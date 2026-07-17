@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+sqlalchemy==2.0.35
+python-multipart==0.0.12
+python-jose[cryptography]==3.3.0
+bcrypt==4.2.0
+Pillow==10.4.0
+numpy==1.26.4
+opencv-python-headless==4.10.0.84
+aiofiles==24.1.0
