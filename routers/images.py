@@ -20,7 +20,7 @@ async def upload_images(
     current_user: models.User = Depends(get_current_user)
 ):
     if not session_id:
-        session_id = str(uuid.uuid4())
+        session_id = "local_workspace"
     session_dir = UPLOAD_DIR / str(project_id) / session_id
     session_dir.mkdir(parents=True, exist_ok=True)
     
@@ -42,7 +42,7 @@ def list_images(
 ):
     session_dir = UPLOAD_DIR / str(project_id) / session_id
     if not session_dir.exists():
-        raise HTTPException(status_code=404, detail="Session not found")
+        return {"image_names": []}
         
     images = [f.name for f in session_dir.iterdir() if f.is_file()]
     return {"image_names": images}
