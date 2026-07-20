@@ -111,6 +111,15 @@ async def upload_prelabels(
         raise HTTPException(status_code=400, detail={"message": "Validation failed", "invalid_files": invalid_files})
         
     if parsed_data:
+        # Delete old pre-labels for the images being updated to keep only the latest
+        processed_images = list(set([p.img_name for p in parsed_data]))
+        if project.type in ["Yolo", "Yolo OBB"]:
+            db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id, models.YoloPrelabel.img_name.in_(processed_images)).delete(synchronize_session=False)
+        elif project.type == "Classification":
+            db.query(models.ClassificationPrelabel).filter(models.ClassificationPrelabel.project_id == project_id, models.ClassificationPrelabel.img_name.in_(processed_images)).delete(synchronize_session=False)
+        elif project.type == "Ocr":
+            db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id, models.OcrPrelabel.img_name.in_(processed_images)).delete(synchronize_session=False)
+
         db.bulk_save_objects(parsed_data)
         db.commit()
         
