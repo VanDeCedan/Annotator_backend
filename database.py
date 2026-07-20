@@ -1,8 +1,16 @@
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker, DeclarativeBase
+from pathlib import Path
 import os
 
-SQLALCHEMY_DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./annotator.db")
+# DATA_DIR is the persistent folder where the DB and uploads will live.
+# Defaults to a ./data folder next to the app.
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(Path(__file__).parent / "data")))
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+SQLALCHEMY_DATABASE_URL = os.environ.get(
+    "DATABASE_URL", f"sqlite:///{DATA_DIR / 'annotator.db'}"
+)
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL,

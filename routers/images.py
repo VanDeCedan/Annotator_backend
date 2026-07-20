@@ -7,10 +7,12 @@ import shutil
 from pathlib import Path
 from dependencies import get_current_user
 import models
+from database import DATA_DIR
 
 router = APIRouter(prefix="/projects/{project_id}/images")
 
-UPLOAD_DIR = Path("tmp_uploads")
+UPLOAD_DIR = DATA_DIR / "tmp_uploads"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 @router.post("/upload")
 async def upload_images(
