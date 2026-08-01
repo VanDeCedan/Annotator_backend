@@ -51,6 +51,7 @@ class ClassCreate(ClassBase):
 class ClassUpdate(BaseModel):
     label: Optional[str] = None
     color: Optional[str] = None
+    code: Optional[int] = None
 
 class ClassOut(ClassBase):
     id: int

@@ -63,6 +63,25 @@ def update_class(
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
         
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+        
+    if class_in.code is not None and class_in.code != cls.code:
+        # Check if the new code already exists
+        existing_code = db.query(models.Class).filter(models.Class.project_id == project_id, models.Class.code == class_in.code).first()
+        if existing_code:
+            raise HTTPException(status_code=400, detail="Class code already exists in this project")
+            
+        old_code = cls.code
+        cls.code = class_in.code
+        
+        # Cascade the update
+        if project and project.type in ["Yolo", "Yolo OBB"]:
+            db.query(models.YoloLabel).filter(models.YoloLabel.project_id == project_id, models.YoloLabel.class_code == old_code).update({"class_code": class_in.code})
+            db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id, models.YoloPrelabel.class_code == old_code).update({"class_code": class_in.code})
+        elif project and project.type == "Classification":
+            db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.class_code == old_code).update({"class_code": class_in.code})
+            db.query(models.ClassificationPrelabel).filter(models.ClassificationPrelabel.project_id == project_id, models.ClassificationPrelabel.class_code == old_code).update({"class_code": class_in.code})
+
     if class_in.label is not None:
         cls.label = class_in.label
     if class_in.color is not None:
