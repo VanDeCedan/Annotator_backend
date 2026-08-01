@@ -33,7 +33,8 @@ def generate_dataset(
          for l in db_labels:
              if l.img_name not in grouped:
                  grouped[l.img_name] = []
-             grouped[l.img_name].append((l.class_code, [float(x) for x in l.coordinates.split()]))
+             if l.class_code != -1:
+                 grouped[l.img_name].append((l.class_code, [float(x) for x in l.coordinates.split()]))
              
          for img_name, lbls in grouped.items():
              labels_data.append((img_name, lbls))

@@ -28,8 +28,8 @@ def get_labels(
         if not labels:
              img_stem = Path(img_name).stem
              prelabels = db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id, models.YoloPrelabel.img_name == img_stem).all()
-             return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates} for l in labels], "prelabels": [{"class_code": p.class_code, "coordinates": p.coordinates} for p in prelabels]}
-        return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates} for l in labels], "prelabels": []}
+             return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates} for l in labels if l.class_code != -1], "prelabels": [{"class_code": p.class_code, "coordinates": p.coordinates} for p in prelabels]}
+        return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates} for l in labels if l.class_code != -1], "prelabels": []}
              
     elif project.type == "Classification":
         label = db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.img_name == img_name).first()
@@ -60,6 +60,10 @@ def save_yolo_labels(
         models.YoloLabel(project_id=project_id, img_name=request.img_name, class_code=l.class_code, coordinates=l.coordinates)
         for l in request.labels
     ]
+    if not new_labels:
+        # Insert a dummy record to indicate the image was annotated as background
+        new_labels.append(models.YoloLabel(project_id=project_id, img_name=request.img_name, class_code=-1, coordinates=""))
+        
     if new_labels:
         db.bulk_save_objects(new_labels)
     db.commit()
