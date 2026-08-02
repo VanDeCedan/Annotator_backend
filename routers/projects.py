@@ -1,10 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
+import shutil
 from database import get_db
 from dependencies import get_current_user, require_role
 from schemas import ProjectCreate, ProjectUpdate, ProjectOut
 import models
+from routers.images import UPLOAD_DIR
 
 router = APIRouter()
 
@@ -67,3 +69,33 @@ def deactivate_project(
     db.commit()
     db.refresh(project)
     return project
+
+@router.delete("/{project_id}")
+def delete_project(
+    project_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin"))
+):
+    """Permanently delete a project and ALL associated data (labels, classes, images on disk)."""
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Delete all DB records associated with this project
+    db.query(models.YoloLabel).filter(models.YoloLabel.project_id == project_id).delete()
+    db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id).delete()
+    db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id).delete()
+    db.query(models.ClassificationPrelabel).filter(models.ClassificationPrelabel.project_id == project_id).delete()
+    db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id).delete()
+    db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id).delete()
+    db.query(models.Class).filter(models.Class.project_id == project_id).delete()
+    db.delete(project)
+    db.commit()
+
+    # Remove image folder from disk (best-effort, non-fatal if missing)
+    project_image_dir = UPLOAD_DIR / str(project_id)
+    if project_image_dir.exists():
+        shutil.rmtree(project_image_dir, ignore_errors=True)
+
+    return {"message": "Project and all associated data deleted successfully"}
+
