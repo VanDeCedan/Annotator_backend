@@ -95,6 +95,7 @@ def update_class(
 def delete_class(
     project_id: int,
     class_id: int,
+    force: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin"))
 ):
@@ -104,7 +105,7 @@ def delete_class(
 
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
 
-    # Block deletion if any annotation references this class
+    # Check if labels exist for this class
     labels_exist = False
     if project.type in ["Yolo", "Yolo OBB"]:
         labels_exist = (
@@ -119,11 +120,31 @@ def delete_class(
             .first() is not None
         )
 
-    if labels_exist:
+    if labels_exist and not force:
         raise HTTPException(
             status_code=409,
-            detail=f"Cannot delete class '{cls.label}': it has existing annotations in this project. Remove all annotations for this class first."
+            detail=f"Class '{cls.label}' has existing annotations. Use force delete to also remove those annotations."
         )
+
+    if labels_exist and force:
+        if project.type in ["Yolo", "Yolo OBB"]:
+            db.query(models.YoloLabel).filter(
+                models.YoloLabel.project_id == project_id,
+                models.YoloLabel.class_code == cls.code
+            ).delete()
+            db.query(models.YoloPrelabel).filter(
+                models.YoloPrelabel.project_id == project_id,
+                models.YoloPrelabel.class_code == cls.code
+            ).delete()
+        elif project.type == "Classification":
+            db.query(models.ClassificationLabel).filter(
+                models.ClassificationLabel.project_id == project_id,
+                models.ClassificationLabel.class_code == cls.code
+            ).delete()
+            db.query(models.ClassificationPrelabel).filter(
+                models.ClassificationPrelabel.project_id == project_id,
+                models.ClassificationPrelabel.class_code == cls.code
+            ).delete()
 
     db.delete(cls)
     db.commit()

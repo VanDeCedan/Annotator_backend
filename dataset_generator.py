@@ -23,6 +23,9 @@ def generate_dataset_zip(
 
     zip_io = io.BytesIO()
 
+    export_mode = getattr(options, "export_mode", "full") or "full"
+    is_crop_mode = export_mode in ["crop", "sliced"] and project.type in ["Yolo", "Yolo OBB"]
+
     # 1. Parse resize
     target_size = None
     if options.resize:
@@ -58,8 +61,6 @@ def generate_dataset_zip(
         }
 
     # 3. Generate Zip
-    # Use ZIP_DEFLATED for compression. Images are processed one at a time and
-    # released immediately to keep peak memory low even for large datasets.
     resample_filter = (
         Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
     )
@@ -86,61 +87,101 @@ def generate_dataset_zip(
                     continue
 
                 try:
-                    # Open, convert and optionally resize – then process in a
-                    # single pass without keeping the PIL object alive longer
-                    # than necessary.
                     with Image.open(img_path) as raw_img:
                         pil_img = raw_img.convert("RGB")
-                        if target_size:
+                        if target_size and not is_crop_mode:
                             pil_img = pil_img.resize(target_size, resample_filter)
 
                     stem = Path(img_name).stem
 
-                    # Write original image
-                    _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
+                    if is_crop_mode:
+                        # Slice boxes from image
+                        img_w, img_h = pil_img.size
+                        for idx, (c_code, coords) in enumerate(img_labels):
+                            if not coords:
+                                continue
+                            if project.type == "Yolo OBB" or len(coords) == 8:
+                                x_pts = [c * img_w for c in coords[0::2]]
+                                y_pts = [c * img_h for c in coords[1::2]]
+                                x_min = max(0, int(round(min(x_pts))))
+                                y_min = max(0, int(round(min(y_pts))))
+                                x_max = min(img_w, int(round(max(x_pts))))
+                                y_max = min(img_h, int(round(max(y_pts))))
+                            else:
+                                cx, cy, w, h = coords[:4]
+                                x_min = max(0, int(round((cx - w / 2.0) * img_w)))
+                                y_min = max(0, int(round((cy - h / 2.0) * img_h)))
+                                x_max = min(img_w, int(round((cx + w / 2.0) * img_w)))
+                                y_max = min(img_h, int(round((cy + h / 2.0) * img_h)))
 
-                    # Augmentations: only for the training split (or when no
-                    # split is enabled). Validation / Test sets MUST NOT be augmented.
-                    if options.augmentation and split_name in ["train", ""]:
-                        if project.type in ["Yolo", "Yolo OBB"]:
-                            aug_results = augment_image_and_labels(
-                                pil_img, img_labels, project.type, options.augmentation
+                            if x_max <= x_min or y_max <= y_min:
+                                continue
+
+                            crop_img = pil_img.crop((x_min, y_min, x_max, y_max))
+                            if target_size:
+                                crop_img = crop_img.resize(target_size, resample_filter)
+
+                            class_name = class_map.get(c_code, f"class_{c_code}")
+                            class_name = str(class_name).replace(" ", "_").replace("/", "_")
+                            crop_stem = f"{stem}_crop_{idx + 1}"
+
+                            _write_single_image_to_zip(
+                                zf, crop_img, f"{prefix}{class_name}/{crop_stem}.jpg"
                             )
-                            for aug_img, aug_lbls, suffix in aug_results:
-                                aug_item = (f"{stem}{suffix}.jpg", aug_lbls)
-                                _write_to_zip(
-                                    zf, project, aug_img, prefix,
-                                    f"{stem}{suffix}", f"{stem}{suffix}.jpg",
-                                    aug_item, class_map,
-                                )
-                                # Release augmented image immediately
-                                del aug_img
-                            del aug_results
-                        else:
-                            aug_results = augment_image_only(pil_img, options.augmentation)
-                            for aug_img, suffix in aug_results:
-                                if project.type == "Classification":
-                                    aug_item = (f"{stem}{suffix}.jpg", class_code)
-                                else:
-                                    aug_item = (f"{stem}{suffix}.jpg", value)
-                                _write_to_zip(
-                                    zf, project, aug_img, prefix,
-                                    f"{stem}{suffix}", f"{stem}{suffix}.jpg",
-                                    aug_item, class_map,
-                                )
-                                # Release augmented image immediately
-                                del aug_img
-                            del aug_results
 
-                    # Release the original PIL image before moving to the next
+                            if options.augmentation and split_name in ["train", ""]:
+                                aug_results = augment_image_only(crop_img, options.augmentation)
+                                for aug_img, suffix in aug_results:
+                                    _write_single_image_to_zip(
+                                        zf, aug_img, f"{prefix}{class_name}/{crop_stem}{suffix}.jpg"
+                                    )
+                                    del aug_img
+                                del aug_results
+
+                            del crop_img
+
+                    else:
+                        # Write original image + labels
+                        _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
+
+                        # Augmentations: only for training split
+                        if options.augmentation and split_name in ["train", ""]:
+                            if project.type in ["Yolo", "Yolo OBB"]:
+                                aug_results = augment_image_and_labels(
+                                    pil_img, img_labels, project.type, options.augmentation
+                                )
+                                for aug_img, aug_lbls, suffix in aug_results:
+                                    aug_item = (f"{stem}{suffix}.jpg", aug_lbls)
+                                    _write_to_zip(
+                                        zf, project, aug_img, prefix,
+                                        f"{stem}{suffix}", f"{stem}{suffix}.jpg",
+                                        aug_item, class_map,
+                                    )
+                                    del aug_img
+                                del aug_results
+                            else:
+                                aug_results = augment_image_only(pil_img, options.augmentation)
+                                for aug_img, suffix in aug_results:
+                                    if project.type == "Classification":
+                                        aug_item = (f"{stem}{suffix}.jpg", class_code)
+                                    else:
+                                        aug_item = (f"{stem}{suffix}.jpg", value)
+                                    _write_to_zip(
+                                        zf, project, aug_img, prefix,
+                                        f"{stem}{suffix}", f"{stem}{suffix}.jpg",
+                                        aug_item, class_map,
+                                    )
+                                    del aug_img
+                                del aug_results
+
                     del pil_img
                     gc.collect()
 
                 except Exception as e:
                     print(f"Error processing {img_name}: {e}")
 
-        # Add data.yaml for YOLO projects
-        if project.type in ["Yolo", "Yolo OBB"]:
+        # Add data.yaml for YOLO projects in full export mode
+        if project.type in ["Yolo", "Yolo OBB"] and not is_crop_mode:
             classes_list = [class_map[k] for k in sorted(class_map.keys())]
             names_str = "[" + ", ".join([f"'{n}'" for n in classes_list]) + "]"
 
@@ -155,6 +196,14 @@ def generate_dataset_zip(
             zf.writestr("data.yaml", yaml_content)
 
     return zip_io
+
+
+def _write_single_image_to_zip(zf, pil_img, zip_path):
+    """Encode *pil_img* to JPEG bytes and write directly to zip_path."""
+    img_byte_arr = io.BytesIO()
+    pil_img.save(img_byte_arr, format="JPEG", quality=95)
+    zf.writestr(zip_path, img_byte_arr.getvalue())
+    img_byte_arr.close()
 
 
 def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map):
@@ -184,3 +233,4 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
         value = item[1]
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
         zf.writestr(f"{prefix}labels/{stem}.txt", value)
+

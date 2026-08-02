@@ -97,6 +97,7 @@ class AugmentationOptions(BaseModel):
 
 class DatasetRequest(BaseModel):
     session_id: str
+    export_mode: str = "full"  # "full" | "crop" (or "sliced")
     resize: Optional[str] = None
     augmentation: Optional[AugmentationOptions] = None
     split_enabled: bool = False
@@ -104,3 +105,4 @@ class DatasetRequest(BaseModel):
     val_pct: float = 20.0
     test_pct: float = 10.0
     yolo_version: str = "v8"
+

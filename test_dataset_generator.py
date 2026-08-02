@@ -77,5 +77,50 @@ class TestDatasetGeneratorAugmentation(unittest.TestCase):
         self.assertEqual(len(aug_in_valid), 0, "Valid set MUST NOT contain any augmented files")
         self.assertEqual(len(aug_in_test), 0, "Test set MUST NOT contain any augmented files")
 
+    def test_sliced_boxes_export(self):
+        project = MagicMock(spec=models.Project)
+        project.id = 1
+        project.type = "Yolo"
+
+        labels_data = [
+            ("img_0.jpg", [
+                (0, [0.5, 0.5, 0.4, 0.4]), # class 0 (cat)
+                (1, [0.2, 0.2, 0.3, 0.3]), # class 1 (dog)
+            ])
+        ]
+
+        request_opts = DatasetRequest(
+            session_id="test_session",
+            export_mode="crop",
+            split_enabled=False,
+            augmentation=None,
+        )
+
+        dummy_img = Image.new("RGB", (200, 200), color="blue")
+
+        with unittest.mock.patch("dataset_generator.UPLOAD_DIR") as mock_upload:
+            mock_session_dir = MagicMock()
+            mock_upload.__truediv__.return_value.__truediv__.return_value = mock_session_dir
+            mock_path = MagicMock()
+            mock_path.exists.return_value = True
+            mock_session_dir.__truediv__.return_value = mock_path
+
+            with unittest.mock.patch("PIL.Image.open", return_value=dummy_img):
+                zip_io = generate_dataset_zip(
+                    project=project,
+                    session_id="test_session",
+                    labels_data=labels_data,
+                    class_map={0: "cat", 1: "dog"},
+                    options=request_opts
+                )
+
+        with zipfile.ZipFile(zip_io, 'r') as zf:
+            file_list = zf.namelist()
+
+        self.assertIn("cat/img_0_crop_1.jpg", file_list)
+        self.assertIn("dog/img_0_crop_2.jpg", file_list)
+        self.assertNotIn("data.yaml", file_list)
+
 if __name__ == '__main__':
     unittest.main()
+
