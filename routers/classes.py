@@ -95,33 +95,35 @@ def update_class(
 def delete_class(
     project_id: int,
     class_id: int,
-    force: bool = False,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin"))
 ):
     cls = db.query(models.Class).filter(models.Class.project_id == project_id, models.Class.id == class_id).first()
     if not cls:
         raise HTTPException(status_code=404, detail="Class not found")
-        
+
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
-    
-    # Check if labels exist
+
+    # Block deletion if any annotation references this class
     labels_exist = False
     if project.type in ["Yolo", "Yolo OBB"]:
-        labels_exist = db.query(models.YoloLabel).filter(models.YoloLabel.project_id == project_id, models.YoloLabel.class_code == cls.code).first() is not None
+        labels_exist = (
+            db.query(models.YoloLabel)
+            .filter(models.YoloLabel.project_id == project_id, models.YoloLabel.class_code == cls.code)
+            .first() is not None
+        )
     elif project.type == "Classification":
-        labels_exist = db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.class_code == cls.code).first() is not None
+        labels_exist = (
+            db.query(models.ClassificationLabel)
+            .filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.class_code == cls.code)
+            .first() is not None
+        )
 
-    if labels_exist and not force:
-        raise HTTPException(status_code=409, detail="Warning: Labels exist for this class. Use force=true to delete class and its labels.")
-
-    if labels_exist and force:
-        if project.type in ["Yolo", "Yolo OBB"]:
-            db.query(models.YoloLabel).filter(models.YoloLabel.project_id == project_id, models.YoloLabel.class_code == cls.code).delete()
-            db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id, models.YoloPrelabel.class_code == cls.code).delete()
-        elif project.type == "Classification":
-            db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.class_code == cls.code).delete()
-            db.query(models.ClassificationPrelabel).filter(models.ClassificationPrelabel.project_id == project_id, models.ClassificationPrelabel.class_code == cls.code).delete()
+    if labels_exist:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot delete class '{cls.label}': it has existing annotations in this project. Remove all annotations for this class first."
+        )
 
     db.delete(cls)
     db.commit()

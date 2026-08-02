@@ -2,6 +2,7 @@ import io
 import os
 import zipfile
 import random
+import gc
 from pathlib import Path
 from PIL import Image
 import models
@@ -9,18 +10,19 @@ from schemas import DatasetRequest
 from augmentation import augment_image_and_labels, augment_image_only
 from routers.images import UPLOAD_DIR
 
+
 def generate_dataset_zip(
     project: models.Project,
     session_id: str,
     labels_data: list,
     class_map: dict,
-    options: DatasetRequest
+    options: DatasetRequest,
 ) -> io.BytesIO:
-    
+
     session_dir = UPLOAD_DIR / str(project.id) / session_id
-    
+
     zip_io = io.BytesIO()
-    
+
     # 1. Parse resize
     target_size = None
     if options.resize:
@@ -41,119 +43,143 @@ def generate_dataset_zip(
         else:
             train_pct = options.train_pct
             val_pct = options.val_pct
-            
+
         shuffled = list(labels_data)
         random.shuffle(shuffled)
-        
+
         n = len(shuffled)
         train_c = int(round(n * (train_pct / 100.0)))
         val_c = int(round(n * (val_pct / 100.0)))
-        
+
         splits = {
             "train": shuffled[:train_c],
-            "valid": shuffled[train_c:train_c+val_c],
-            "test": shuffled[train_c+val_c:]
+            "valid": shuffled[train_c:train_c + val_c],
+            "test": shuffled[train_c + val_c:],
         }
-    
+
     # 3. Generate Zip
-    with zipfile.ZipFile(zip_io, mode='w', compression=zipfile.ZIP_DEFLATED) as zf:
-        
+    # Use ZIP_DEFLATED for compression. Images are processed one at a time and
+    # released immediately to keep peak memory low even for large datasets.
+    resample_filter = (
+        Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+    )
+
+    with zipfile.ZipFile(zip_io, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+
         for split_name, split_data in splits.items():
-            if not split_data: continue
-            
+            if not split_data:
+                continue
+
             prefix = f"{split_name}/" if split_name else ""
-            
+
             for item in split_data:
-                # Unpack
+                # Unpack per project type
                 if project.type in ["Yolo", "Yolo OBB"]:
                     img_name, img_labels = item
                 elif project.type == "Classification":
                     img_name, class_code = item
                 elif project.type == "Ocr":
                     img_name, value = item
-                
-                # Load image
+
                 img_path = session_dir / img_name
-                if not img_path.exists(): continue
-                
+                if not img_path.exists():
+                    continue
+
                 try:
-                    with Image.open(img_path).convert("RGB") as pil_img:
+                    # Open, convert and optionally resize – then process in a
+                    # single pass without keeping the PIL object alive longer
+                    # than necessary.
+                    with Image.open(img_path) as raw_img:
+                        pil_img = raw_img.convert("RGB")
                         if target_size:
-                            resample_filter = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
                             pil_img = pil_img.resize(target_size, resample_filter)
-                            
-                        stem = Path(img_name).stem
-                        
-                        # Process and write original
-                        _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
-                        
-                        # Augmentations (only apply to train set or when no split)
-                        if options.augmentation and split_name in ["train", ""]:
-                            if project.type in ["Yolo", "Yolo OBB"]:
-                                aug_results = augment_image_and_labels(pil_img, img_labels, project.type, options.augmentation)
-                                for aug_img, aug_lbls, suffix in aug_results:
-                                    aug_item = (f"{stem}{suffix}.jpg", aug_lbls)
-                                    _write_to_zip(zf, project, aug_img, prefix, f"{stem}{suffix}", f"{stem}{suffix}.jpg", aug_item, class_map)
-                            else:
-                                aug_results = augment_image_only(pil_img, options.augmentation)
-                                for aug_img, suffix in aug_results:
-                                    if project.type == "Classification":
-                                        aug_item = (f"{stem}{suffix}.jpg", class_code)
-                                    else:
-                                        aug_item = (f"{stem}{suffix}.jpg", value)
-                                    _write_to_zip(zf, project, aug_img, prefix, f"{stem}{suffix}", f"{stem}{suffix}.jpg", aug_item, class_map)
+
+                    stem = Path(img_name).stem
+
+                    # Write original image
+                    _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
+
+                    # Augmentations: only for the training split (or when no
+                    # split is enabled). Validation / Test sets MUST NOT be augmented.
+                    if options.augmentation and split_name in ["train", ""]:
+                        if project.type in ["Yolo", "Yolo OBB"]:
+                            aug_results = augment_image_and_labels(
+                                pil_img, img_labels, project.type, options.augmentation
+                            )
+                            for aug_img, aug_lbls, suffix in aug_results:
+                                aug_item = (f"{stem}{suffix}.jpg", aug_lbls)
+                                _write_to_zip(
+                                    zf, project, aug_img, prefix,
+                                    f"{stem}{suffix}", f"{stem}{suffix}.jpg",
+                                    aug_item, class_map,
+                                )
+                                # Release augmented image immediately
+                                del aug_img
+                            del aug_results
+                        else:
+                            aug_results = augment_image_only(pil_img, options.augmentation)
+                            for aug_img, suffix in aug_results:
+                                if project.type == "Classification":
+                                    aug_item = (f"{stem}{suffix}.jpg", class_code)
+                                else:
+                                    aug_item = (f"{stem}{suffix}.jpg", value)
+                                _write_to_zip(
+                                    zf, project, aug_img, prefix,
+                                    f"{stem}{suffix}", f"{stem}{suffix}.jpg",
+                                    aug_item, class_map,
+                                )
+                                # Release augmented image immediately
+                                del aug_img
+                            del aug_results
+
+                    # Release the original PIL image before moving to the next
+                    del pil_img
+                    gc.collect()
 
                 except Exception as e:
                     print(f"Error processing {img_name}: {e}")
-                    
-        # Add data.yaml for YOLO
+
+        # Add data.yaml for YOLO projects
         if project.type in ["Yolo", "Yolo OBB"]:
             classes_list = [class_map[k] for k in sorted(class_map.keys())]
             names_str = "[" + ", ".join([f"'{n}'" for n in classes_list]) + "]"
-            
-            if options.yolo_version == "v5" or options.yolo_version == "v8":
-                 yaml_content = f"""path: ./
-train: train/images
-val: valid/images
-test: test/images
-nc: {len(classes_list)}
-names: {names_str}
-"""
-            else: # v11 or others
-                 yaml_content = f"""path: ./
-train: train/images
-val: valid/images
-test: test/images
-nc: {len(classes_list)}
-names: {names_str}
-"""
+
+            yaml_content = (
+                f"path: ./\n"
+                f"train: train/images\n"
+                f"val: valid/images\n"
+                f"test: test/images\n"
+                f"nc: {len(classes_list)}\n"
+                f"names: {names_str}\n"
+            )
             zf.writestr("data.yaml", yaml_content)
 
     return zip_io
 
+
 def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map):
-    # Save Image to bytes
+    """Encode *pil_img* to JPEG bytes and write image + label into the zip."""
     img_byte_arr = io.BytesIO()
-    pil_img.save(img_byte_arr, format='JPEG', quality=95)
+    pil_img.save(img_byte_arr, format="JPEG", quality=95)
     img_bytes = img_byte_arr.getvalue()
-    
+    img_byte_arr.close()   # free the intermediate buffer immediately
+
     if project.type in ["Yolo", "Yolo OBB"]:
         img_labels = item[1]
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
-        
+
         lbl_content = ""
         for c_code, coords in img_labels:
             coords_str = " ".join(f"{c:.6f}" for c in coords)
             lbl_content += f"{c_code} {coords_str}\n"
         zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
-        
+
     elif project.type == "Classification":
         class_code = item[1]
         class_name = class_map.get(class_code, f"class_{class_code}")
-        # Sanitize folder name
         class_name = class_name.replace(" ", "_").replace("/", "_")
         zf.writestr(f"{prefix}{class_name}/{stem}.jpg", img_bytes)
-        
+
     elif project.type == "Ocr":
         value = item[1]
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
