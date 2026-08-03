@@ -63,6 +63,7 @@ class ClassOut(ClassBase):
 class YoloLabelItem(BaseModel):
     class_code: int
     coordinates: str
+    box_image: Optional[str] = None
 
 class YoloLabelRequest(BaseModel):
     img_name: str

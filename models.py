@@ -41,6 +41,7 @@ class YoloLabel(Base):
     class_code = Column(Integer, nullable=False)
     img_name = Column(String, nullable=False)
     coordinates = Column(String, nullable=False)
+    box_image = Column(String, nullable=True)
 
 
 class YoloPrelabel(Base):
@@ -51,6 +52,7 @@ class YoloPrelabel(Base):
     class_code = Column(Integer, nullable=False)
     img_name = Column(String, nullable=False)
     coordinates = Column(String, nullable=False)
+    box_image = Column(String, nullable=True)
 
 
 class ClassificationLabel(Base):

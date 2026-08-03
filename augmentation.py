@@ -112,16 +112,17 @@ def augment_image_and_labels(
                 flip = random.choice(flips)
                 if flip == "flip_h":
                     aug_img = aug_img.transpose(Image.FLIP_LEFT_RIGHT)
-                    aug_labels = [(c, _flip_coords(p, "h", project_type)) for c, p in aug_labels]
+                    aug_labels = [(lbl[0], _flip_coords(lbl[1], "h", project_type), *lbl[2:]) for lbl in aug_labels]
                     applied.append("FlipH")
                 elif flip == "flip_v":
                     aug_img = aug_img.transpose(Image.FLIP_TOP_BOTTOM)
-                    aug_labels = [(c, _flip_coords(p, "v", project_type)) for c, p in aug_labels]
+                    aug_labels = [(lbl[0], _flip_coords(lbl[1], "v", project_type), *lbl[2:]) for lbl in aug_labels]
                     applied.append("FlipV")
                 elif flip == "flip_hv":
                     aug_img = aug_img.transpose(Image.ROTATE_180)
-                    aug_labels = [(c, _flip_coords(p, "hv", project_type)) for c, p in aug_labels]
+                    aug_labels = [(lbl[0], _flip_coords(lbl[1], "hv", project_type), *lbl[2:]) for lbl in aug_labels]
                     applied.append("FlipHV")
+
 
             if "grain" in chosen:
                 aug_img = apply_camera_grain(aug_img)

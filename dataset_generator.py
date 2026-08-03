@@ -11,6 +11,71 @@ from augmentation import augment_image_and_labels, augment_image_only
 from routers.images import UPLOAD_DIR
 
 
+import math
+
+def composite_box_images(pil_img, img_labels, project_id, project_type):
+    if not img_labels:
+        return pil_img
+    
+    box_dir = UPLOAD_DIR / str(project_id) / "box_images"
+    if not box_dir.exists():
+        return pil_img
+
+    img_w, img_h = pil_img.size
+    
+    for item in img_labels:
+        box_image_name = item[2] if len(item) > 2 else None
+        if not box_image_name:
+            continue
+            
+        box_path = box_dir / box_image_name
+        if not box_path.exists():
+            continue
+            
+        try:
+            with Image.open(box_path) as box_raw:
+                box_img = box_raw.convert("RGBA")
+                coords = item[1]
+                resample = Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
+                bicubic = Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
+                
+                if project_type == "Yolo OBB" or len(coords) == 8:
+                    if len(coords) == 8:
+                        x1, y1, x2, y2, x3, y3, x4, y4 = [
+                            coords[0] * img_w, coords[1] * img_h,
+                            coords[2] * img_w, coords[3] * img_h,
+                            coords[4] * img_w, coords[5] * img_h,
+                            coords[6] * img_w, coords[7] * img_h
+                        ]
+                        cx = (x1 + x2 + x3 + x4) / 4.0
+                        cy = (y1 + y2 + y3 + y4) / 4.0
+                        w = math.hypot(x2 - x1, y2 - y1)
+                        h = math.hypot(x3 - x2, y3 - y2)
+                        angle_rad = math.atan2(y2 - y1, x2 - x1)
+                        angle_deg = math.degrees(angle_rad)
+                        
+                        box_resized = box_img.resize((max(1, int(round(w))), max(1, int(round(h)))), resample)
+                        box_rotated = box_resized.rotate(-angle_deg, expand=True, resample=bicubic)
+                        
+                        paste_x = int(round(cx - box_rotated.width / 2.0))
+                        paste_y = int(round(cy - box_rotated.height / 2.0))
+                        
+                        pil_img.paste(box_rotated, (paste_x, paste_y), box_rotated)
+                elif len(coords) == 4:
+                    cx, cy, w, h = coords[:4]
+                    bw = int(round(w * img_w))
+                    bh = int(round(h * img_h))
+                    if bw > 0 and bh > 0:
+                        box_resized = box_img.resize((bw, bh), resample)
+                        top_left_x = int(round((cx - w / 2.0) * img_w))
+                        top_left_y = int(round((cy - h / 2.0) * img_h))
+                        pil_img.paste(box_resized, (top_left_x, top_left_y), box_resized)
+        except Exception as e:
+            print(f"Error compositing box image {box_image_name}: {e}")
+            
+    return pil_img
+
+
 def generate_dataset_zip(
     project: models.Project,
     session_id: str,
@@ -89,6 +154,8 @@ def generate_dataset_zip(
                 try:
                     with Image.open(img_path) as raw_img:
                         pil_img = raw_img.convert("RGB")
+                        if project.type in ["Yolo", "Yolo OBB"]:
+                            pil_img = composite_box_images(pil_img, img_labels, project.id, project.type)
                         if target_size and not is_crop_mode:
                             pil_img = pil_img.resize(target_size, resample_filter)
 
@@ -97,7 +164,9 @@ def generate_dataset_zip(
                     if is_crop_mode:
                         # Slice boxes from image
                         img_w, img_h = pil_img.size
-                        for idx, (c_code, coords) in enumerate(img_labels):
+                        for idx, lbl in enumerate(img_labels):
+                            c_code = lbl[0]
+                            coords = lbl[1]
                             if not coords:
                                 continue
                             if project.type == "Yolo OBB" or len(coords) == 8:
@@ -218,9 +287,13 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
 
         lbl_content = ""
-        for c_code, coords in img_labels:
+        for lbl in img_labels:
+            c_code = lbl[0]
+            coords = lbl[1]
             coords_str = " ".join(f"{c:.6f}" for c in coords)
             lbl_content += f"{c_code} {coords_str}\n"
+        zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
+
         zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
 
     elif project.type == "Classification":

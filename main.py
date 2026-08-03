@@ -5,9 +5,29 @@ import models
 from routers import auth, users, projects, classes, images, prelabels, labels, dataset
 import os
 
+from sqlalchemy import text
+
 Base.metadata.create_all(bind=engine)
 
+def auto_migrate_schema():
+    with engine.connect() as conn:
+        for model in [models.YoloLabel, models.YoloPrelabel]:
+            table_name = model.__tablename__
+            try:
+                res = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+                existing_cols = {row[1] for row in res}
+                if existing_cols:
+                    for col_name, col_obj in model.__table__.columns.items():
+                        if col_name not in existing_cols:
+                            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} VARCHAR"))
+                            conn.commit()
+            except Exception as e:
+                print(f"Auto-migration info for {table_name}: {e}")
+
+auto_migrate_schema()
+
 app = FastAPI(title="CV Annotator API", version="1.0.0")
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +42,7 @@ app.include_router(users.router, prefix="/users", tags=["users"])
 app.include_router(projects.router, prefix="/projects", tags=["projects"])
 app.include_router(classes.router, tags=["classes"])
 app.include_router(images.router, tags=["images"])
+app.include_router(images.box_images_router, tags=["box_images"])
 app.include_router(prelabels.router, tags=["prelabels"])
 app.include_router(labels.router, tags=["labels"])
 app.include_router(dataset.router, tags=["dataset"])

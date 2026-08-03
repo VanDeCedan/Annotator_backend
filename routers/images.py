@@ -72,3 +72,58 @@ def delete_session(
     if session_dir.exists():
         shutil.rmtree(session_dir)
     return {"message": "Session deleted"}
+
+
+# --- Box Images Router ---
+box_images_router = APIRouter(prefix="/projects/{project_id}/box-images")
+
+@box_images_router.post("/upload")
+async def upload_box_images(
+    project_id: int,
+    files: List[UploadFile] = File(...),
+    current_user: models.User = Depends(get_current_user)
+):
+    box_dir = UPLOAD_DIR / str(project_id) / "box_images"
+    box_dir.mkdir(parents=True, exist_ok=True)
+    
+    uploaded = []
+    for file in files:
+        if file.filename:
+            file_path = box_dir / file.filename
+            with open(file_path, "wb") as buffer:
+                shutil.copyfileobj(file.file, buffer)
+            uploaded.append(file.filename)
+            
+    return {"image_names": uploaded}
+
+@box_images_router.get("/")
+def list_box_images(
+    project_id: int,
+    current_user: models.User = Depends(get_current_user)
+):
+    box_dir = UPLOAD_DIR / str(project_id) / "box_images"
+    if not box_dir.exists():
+        return {"image_names": []}
+    images = [f.name for f in box_dir.iterdir() if f.is_file()]
+    return {"image_names": images}
+
+@box_images_router.get("/{img_name}")
+def get_box_image(
+    project_id: int,
+    img_name: str,
+    current_user: models.User = Depends(get_current_user)
+):
+    file_path = UPLOAD_DIR / str(project_id) / "box_images" / img_name
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="Box image not found")
+    return FileResponse(path=file_path)
+
+@box_images_router.delete("/")
+def clear_box_images(
+    project_id: int,
+    current_user: models.User = Depends(get_current_user)
+):
+    box_dir = UPLOAD_DIR / str(project_id) / "box_images"
+    if box_dir.exists():
+        shutil.rmtree(box_dir)
+    return {"message": "Box images cleared"}
