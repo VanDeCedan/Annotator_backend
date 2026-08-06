@@ -98,6 +98,7 @@ class AugmentationOptions(BaseModel):
 
 class DatasetRequest(BaseModel):
     session_id: str
+    task_id: Optional[str] = None
     export_mode: str = "full"  # "full" | "crop" (or "sliced")
     resize: Optional[str] = None
     augmentation: Optional[AugmentationOptions] = None

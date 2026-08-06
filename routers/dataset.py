@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi.responses import FileResponse
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 from database import get_db
@@ -7,13 +7,24 @@ from dependencies import require_role
 from schemas import DatasetRequest
 from dataset_generator import generate_dataset_zip
 import models
+import time
+import os
+import tempfile
+from typing import Dict, Any
 
 router = APIRouter(prefix="/projects/{project_id}/dataset")
+
+generation_progress: Dict[str, Dict[str, Any]] = {}
+
+@router.get("/progress/{session_id}")
+async def get_dataset_progress(session_id: str):
+    return generation_progress.get(session_id, {"current": 0, "total": 0, "start_time": time.time()})
 
 @router.post("/generate")
 async def generate_dataset(
     project_id: int,
     request: DatasetRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin"))
 ):
@@ -51,24 +62,39 @@ async def generate_dataset(
     if not labels_data:
         raise HTTPException(status_code=400, detail="No labeled data found for this project")
 
+    task_id = request.task_id or request.session_id
+    generation_progress[task_id] = {"current": 0, "total": len(labels_data), "start_time": time.time()}
+
+    def progress_callback(current, total):
+        if task_id in generation_progress:
+            generation_progress[task_id]["current"] = current
+            generation_progress[task_id]["total"] = total
+
     # Run the heavy CPU/IO work in a thread pool so the event loop stays free.
-    # This prevents the server from appearing to hang on large datasets or
-    # when many augmentations are requested.
     try:
-        zip_io = await run_in_threadpool(
+        # Create a temporary file
+        fd, temp_path = tempfile.mkstemp(suffix=".zip")
+        os.close(fd) # Close file descriptor, zipfile will open it
+
+        await run_in_threadpool(
             generate_dataset_zip,
             project=project,
             session_id=request.session_id,
             labels_data=labels_data,
             class_map=class_map,
             options=request,
+            progress_callback=progress_callback,
+            output_path=temp_path
         )
-        zip_io.seek(0)
 
         headers = {
             "Content-Disposition": f'attachment; filename="dataset_{project.name.replace(" ", "_")}.zip"'
         }
-        return StreamingResponse(zip_io, media_type="application/zip", headers=headers)
+        
+        # Schedule cleanup task
+        background_tasks.add_task(os.remove, temp_path)
+
+        return FileResponse(temp_path, media_type="application/zip", headers=headers)
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

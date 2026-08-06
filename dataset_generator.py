@@ -82,11 +82,11 @@ def generate_dataset_zip(
     labels_data: list,
     class_map: dict,
     options: DatasetRequest,
-) -> io.BytesIO:
+    progress_callback=None,
+    output_path: str = None,
+) -> None:
 
     session_dir = UPLOAD_DIR / str(project.id) / session_id
-
-    zip_io = io.BytesIO()
 
     export_mode = getattr(options, "export_mode", "full") or "full"
     is_crop_mode = export_mode in ["crop", "sliced"] and project.type in ["Yolo", "Yolo OBB"]
@@ -130,7 +130,10 @@ def generate_dataset_zip(
         Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
     )
 
-    with zipfile.ZipFile(zip_io, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+    with zipfile.ZipFile(output_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+
+        total_items = sum(len(sd) for sd in splits.values())
+        current_item = 0
 
         for split_name, split_data in splits.items():
             if not split_data:
@@ -139,6 +142,10 @@ def generate_dataset_zip(
             prefix = f"{split_name}/" if split_name else ""
 
             for item in split_data:
+                current_item += 1
+                if progress_callback:
+                    progress_callback(current_item, total_items)
+
                 # Unpack per project type
                 if project.type in ["Yolo", "Yolo OBB"]:
                     img_name, img_labels = item
@@ -264,7 +271,8 @@ def generate_dataset_zip(
             )
             zf.writestr("data.yaml", yaml_content)
 
-    return zip_io
+    # File is closed when 'with' block exits.
+
 
 
 def _write_single_image_to_zip(zf, pil_img, zip_path):
@@ -292,8 +300,6 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
             coords = lbl[1]
             coords_str = " ".join(f"{c:.6f}" for c in coords)
             lbl_content += f"{c_code} {coords_str}\n"
-        zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
-
         zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
 
     elif project.type == "Classification":
