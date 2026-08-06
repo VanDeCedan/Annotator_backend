@@ -89,3 +89,11 @@ class OcrPrelabel(Base):
     project_id = Column(Integer, ForeignKey("projects.id"))
     img_name = Column(String, nullable=False)
     value = Column(String, nullable=False)
+
+
+class SkippedImage(Base):
+    __tablename__ = "skipped_images"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    img_name = Column(String, nullable=False)

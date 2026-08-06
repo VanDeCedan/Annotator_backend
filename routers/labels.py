@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import distinct
 from database import get_db
 from dependencies import get_current_user, require_role
-from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest
+from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, SkipImageRequest
 from typing import Union
 from pathlib import Path
 import models
@@ -95,6 +95,23 @@ def save_ocr_label(
     db.commit()
     return {"message": "Saved"}
 
+@router.post("/skip")
+def skip_image(
+    project_id: int,
+    request: SkipImageRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "annotator"))
+):
+    existing = db.query(models.SkippedImage).filter(
+        models.SkippedImage.project_id == project_id, 
+        models.SkippedImage.img_name == request.img_name
+    ).first()
+    if not existing:
+        skipped = models.SkippedImage(project_id=project_id, img_name=request.img_name)
+        db.add(skipped)
+        db.commit()
+    return {"message": "Skipped"}
+
 @router.get("/progress/")
 def get_progress(
     project_id: int,
@@ -113,4 +130,10 @@ def get_progress(
     elif project.type == "Ocr":
          labeled_images = [r[0] for r in db.query(models.OcrLabel.img_name).filter(models.OcrLabel.project_id == project_id).distinct().all()]
          
-    return {"labeled_images": labeled_images, "labeled_count": len(labeled_images)}
+    skipped_images = [r[0] for r in db.query(models.SkippedImage.img_name).filter(models.SkippedImage.project_id == project_id).distinct().all()]
+    
+    return {
+        "labeled_images": labeled_images, 
+        "labeled_count": len(labeled_images),
+        "skipped_images": skipped_images
+    }

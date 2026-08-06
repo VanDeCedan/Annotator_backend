@@ -77,6 +77,9 @@ class OcrLabelRequest(BaseModel):
     img_name: str
     value: str
 
+class SkipImageRequest(BaseModel):
+    img_name: str
+
 # --- Token Schemas ---
 class Token(BaseModel):
     access_token: str

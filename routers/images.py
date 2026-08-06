@@ -62,6 +62,38 @@ def get_image(
         
     return FileResponse(path=file_path)
 
+@router.delete("/{session_id}/{img_name}")
+def delete_image(
+    project_id: int,
+    session_id: str,
+    img_name: str,
+    current_user: models.User = Depends(get_current_user)
+):
+    from database import SessionLocal
+    db = SessionLocal()
+    try:
+        # Delete from DB
+        db.query(models.YoloLabel).filter(models.YoloLabel.project_id == project_id, models.YoloLabel.img_name == img_name).delete()
+        db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.img_name == img_name).delete()
+        db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id, models.OcrLabel.img_name == img_name).delete()
+        
+        img_stem = Path(img_name).stem
+        db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id, models.YoloPrelabel.img_name == img_stem).delete()
+        db.query(models.ClassificationPrelabel).filter(models.ClassificationPrelabel.project_id == project_id, models.ClassificationPrelabel.img_name == img_stem).delete()
+        db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id, models.OcrPrelabel.img_name == img_stem).delete()
+        
+        db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == img_name).delete()
+        db.commit()
+    finally:
+        db.close()
+        
+    # Delete from FS
+    file_path = UPLOAD_DIR / str(project_id) / session_id / img_name
+    if file_path.exists():
+        os.remove(file_path)
+        
+    return {"message": "Image deleted"}
+
 @router.delete("/{session_id}")
 def delete_session(
     project_id: int,
