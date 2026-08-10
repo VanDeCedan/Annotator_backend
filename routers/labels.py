@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import distinct
 from database import get_db
 from dependencies import get_current_user, require_role
-from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, SkipImageRequest
+from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, DeskewerLabelRequest, SkipImageRequest
 from typing import Union
 from pathlib import Path
 import models
@@ -46,6 +46,14 @@ def get_labels(
             prelabel = db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id, models.OcrPrelabel.img_name == img_stem).first()
             return {"type": project.type, "label": None, "prelabel": prelabel.value if prelabel else None}
         return {"type": project.type, "label": label.value, "prelabel": None}
+        
+    elif project.type == "Deskewer":
+        label = db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id, models.DeskewerLabel.img_name == img_name).first()
+        if not label:
+            img_stem = Path(img_name).stem
+            prelabel = db.query(models.DeskewerPrelabel).filter(models.DeskewerPrelabel.project_id == project_id, models.DeskewerPrelabel.img_name == img_stem).first()
+            return {"type": project.type, "label": None, "prelabel": prelabel.angle if prelabel else None, "crop_box": prelabel.crop_box if prelabel else None}
+        return {"type": project.type, "label": label.angle, "prelabel": None, "crop_box": label.crop_box}
 
 @router.post("/yolo")
 def save_yolo_labels(
@@ -66,6 +74,7 @@ def save_yolo_labels(
         
     if new_labels:
         db.bulk_save_objects(new_labels)
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
     db.commit()
     return {"message": "Saved"}
 
@@ -79,6 +88,7 @@ def save_classification_label(
     db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.img_name == request.img_name).delete()
     new_label = models.ClassificationLabel(project_id=project_id, img_name=request.img_name, class_code=request.class_code)
     db.add(new_label)
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
     db.commit()
     return {"message": "Saved"}
 
@@ -89,9 +99,36 @@ def save_ocr_label(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_role("admin", "annotator"))
 ):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    
+    if project.ocr_charset:
+        invalid_chars = {char for char in request.value if char not in project.ocr_charset}
+        if invalid_chars:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Validation failed. Invalid characters: {', '.join(sorted(invalid_chars))}. Only these are allowed: {project.ocr_charset}"
+            )
+
     db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id, models.OcrLabel.img_name == request.img_name).delete()
     new_label = models.OcrLabel(project_id=project_id, img_name=request.img_name, value=request.value)
     db.add(new_label)
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
+    db.commit()
+    return {"message": "Saved"}
+
+@router.post("/deskewer")
+def save_deskewer_label(
+    project_id: int,
+    request: DeskewerLabelRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "annotator"))
+):
+    db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id, models.DeskewerLabel.img_name == request.img_name).delete()
+    new_label = models.DeskewerLabel(project_id=project_id, img_name=request.img_name, angle=request.angle, crop_box=request.crop_box)
+    db.add(new_label)
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
     db.commit()
     return {"message": "Saved"}
 
@@ -129,6 +166,8 @@ def get_progress(
          labeled_images = [r[0] for r in db.query(models.ClassificationLabel.img_name).filter(models.ClassificationLabel.project_id == project_id).distinct().all()]
     elif project.type == "Ocr":
          labeled_images = [r[0] for r in db.query(models.OcrLabel.img_name).filter(models.OcrLabel.project_id == project_id).distinct().all()]
+    elif project.type == "Deskewer":
+         labeled_images = [r[0] for r in db.query(models.DeskewerLabel.img_name).filter(models.DeskewerLabel.project_id == project_id).distinct().all()]
          
     skipped_images = [r[0] for r in db.query(models.SkippedImage.img_name).filter(models.SkippedImage.project_id == project_id).distinct().all()]
     

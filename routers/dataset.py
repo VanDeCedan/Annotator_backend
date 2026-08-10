@@ -59,6 +59,11 @@ async def generate_dataset(
         for l in db_labels:
             labels_data.append((l.img_name, l.value))
 
+    elif project.type == "Deskewer":
+        db_labels = db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id).all()
+        for l in db_labels:
+            labels_data.append((l.img_name, (l.angle, l.crop_box)))
+
     if not labels_data:
         raise HTTPException(status_code=400, detail="No labeled data found for this project")
 

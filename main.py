@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 import models
-from routers import auth, users, projects, classes, images, prelabels, labels, dataset
+from routers import auth, users, projects, classes, images, prelabels, labels, dataset, inference
 import os
 
 from sqlalchemy import text
@@ -11,7 +11,7 @@ Base.metadata.create_all(bind=engine)
 
 def auto_migrate_schema():
     with engine.connect() as conn:
-        for model in [models.YoloLabel, models.YoloPrelabel]:
+        for model in [models.YoloLabel, models.YoloPrelabel, models.Project]:
             table_name = model.__tablename__
             try:
                 res = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
@@ -46,6 +46,7 @@ app.include_router(images.box_images_router, tags=["box_images"])
 app.include_router(prelabels.router, tags=["prelabels"])
 app.include_router(labels.router, tags=["labels"])
 app.include_router(dataset.router, tags=["dataset"])
+app.include_router(inference.router, prefix="/projects", tags=["inference"])
 
 @app.on_event("startup")
 def create_initial_admin():

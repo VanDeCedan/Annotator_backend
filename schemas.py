@@ -24,7 +24,8 @@ class UserOut(UserBase):
 # --- Project Schemas ---
 class ProjectBase(BaseModel):
     name: str
-    type: str  # Yolo | Yolo OBB | Ocr | Classification
+    type: str  # Yolo | Yolo OBB | Ocr | Classification | Deskewer
+    ocr_charset: Optional[str] = None
 
 class ProjectCreate(ProjectBase):
     pass
@@ -32,6 +33,7 @@ class ProjectCreate(ProjectBase):
 class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
+    ocr_charset: Optional[str] = None
 
 class ProjectOut(ProjectBase):
     id: int
@@ -77,6 +79,11 @@ class OcrLabelRequest(BaseModel):
     img_name: str
     value: str
 
+class DeskewerLabelRequest(BaseModel):
+    img_name: str
+    angle: int
+    crop_box: Optional[str] = None
+
 class SkipImageRequest(BaseModel):
     img_name: str
 
@@ -98,12 +105,19 @@ class AugmentationOptions(BaseModel):
     noise: bool = False
     blur: bool = False
     num_augs: int = 3
+    deskew_angles: List[int] = []
+    
+    # OCR-Specific Augmentations
+    ocr_distortion_intensity: float = 0.0
+    ocr_noise_intensity: float = 0.0
+    ocr_blur_intensity: float = 0.0
 
 class DatasetRequest(BaseModel):
     session_id: str
     task_id: Optional[str] = None
     export_mode: str = "full"  # "full" | "crop" (or "sliced")
     resize: Optional[str] = None
+    grayscale: bool = False
     augmentation: Optional[AugmentationOptions] = None
     split_enabled: bool = False
     train_pct: float = 70.0

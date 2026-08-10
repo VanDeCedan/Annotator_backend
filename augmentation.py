@@ -144,6 +144,62 @@ def augment_image_and_labels(
         
     return results
 
+def apply_ocr_distortion(pil_img: Image.Image, intensity: float) -> Image.Image:
+    if intensity <= 0:
+        return pil_img
+    img_np = np.array(pil_img)
+    h, w = img_np.shape[:2]
+    
+    # Scale intensity (1-10) to distortion ratio (e.g. 0.03 to 0.3)
+    distortion = (intensity / 10.0) * 0.3
+    
+    pts1 = np.float32([[0, 0], [w, 0], [0, h], [w, h]])
+    dx = w * distortion
+    dy = h * distortion
+    pts2 = np.float32([
+        [random.uniform(0, dx), random.uniform(0, dy)],
+        [w - random.uniform(0, dx), random.uniform(0, dy)],
+        [random.uniform(0, dx), h - random.uniform(0, dy)],
+        [w - random.uniform(0, dx), h - random.uniform(0, dy)]
+    ])
+    
+    M = cv2.getPerspectiveTransform(pts1, pts2)
+    warped = cv2.warpPerspective(img_np, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
+    return Image.fromarray(warped)
+
+def apply_ocr_noise(pil_img: Image.Image, intensity: float) -> Image.Image:
+    if intensity <= 0:
+        return pil_img
+    img_np = np.array(pil_img)
+    # Scale intensity (1-10) to standard deviation of Gaussian noise (up to 50)
+    std = (intensity / 10.0) * 50.0
+    noise = np.random.normal(0, std, img_np.shape)
+    noisy = np.clip(img_np.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+    return Image.fromarray(noisy)
+
+def apply_ocr_blur(pil_img: Image.Image, intensity: float) -> Image.Image:
+    if intensity <= 0:
+        return pil_img
+    img_np = np.array(pil_img)
+    # Scale intensity (1-10) to kernel size (3 to 17)
+    ksize = int(round((intensity / 10.0) * 14.0))
+    if ksize % 2 == 0:
+        ksize += 1
+    ksize = max(3, ksize)
+    
+    if random.random() < 0.5:
+        # Motion blur
+        kernel = np.zeros((ksize, ksize))
+        angle = random.uniform(0, 180)
+        center = ksize // 2
+        cv2.ellipse(kernel, (center, center), (center, 0), angle, 0, 360, 1, -1)
+        kernel = kernel / np.sum(kernel)
+        blurred = cv2.filter2D(img_np, -1, kernel)
+    else:
+        # Gaussian blur
+        blurred = cv2.GaussianBlur(img_np, (ksize, ksize), 0)
+    return Image.fromarray(blurred)
+
 def augment_image_only(
     pil_img: Image.Image,
     opts: Dict[str, Any],
@@ -157,6 +213,15 @@ def augment_image_only(
     if getattr(opts, "grain", False):   enabled.append("grain")
     if getattr(opts, "noise", False):   enabled.append("noise")
     if getattr(opts, "blur", False):    enabled.append("blur")
+    
+    # OCR specific
+    ocr_distortion = getattr(opts, "ocr_distortion_intensity", 0.0)
+    ocr_noise = getattr(opts, "ocr_noise_intensity", 0.0)
+    ocr_blur = getattr(opts, "ocr_blur_intensity", 0.0)
+    
+    if ocr_distortion > 0: enabled.append("ocr_distortion")
+    if ocr_noise > 0:      enabled.append("ocr_noise")
+    if ocr_blur > 0:       enabled.append("ocr_blur")
 
     if not enabled:
         return results
@@ -198,6 +263,14 @@ def augment_image_only(
                 ksize = random.choice([3, 5])
                 aug_img = apply_blur(aug_img, ksize)
                 applied.append(f"BlurK{ksize}")
+            
+            # OCR Specific Apps
+            if "ocr_distortion" in chosen:
+                aug_img = apply_ocr_distortion(aug_img, ocr_distortion)
+            if "ocr_noise" in chosen:
+                aug_img = apply_ocr_noise(aug_img, ocr_noise)
+            if "ocr_blur" in chosen:
+                aug_img = apply_ocr_blur(aug_img, ocr_blur)
         
         results.append((aug_img, f"_aug_{k+1}"))
         gc.collect()

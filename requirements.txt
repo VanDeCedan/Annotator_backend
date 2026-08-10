@@ -8,3 +8,4 @@ Pillow==10.4.0
 numpy==1.26.4
 opencv-python-headless==4.10.0.84
 aiofiles==24.1.0
+onnxruntime>=1.17.1

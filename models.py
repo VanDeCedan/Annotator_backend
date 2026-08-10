@@ -17,7 +17,8 @@ class Project(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
-    type = Column(String, nullable=False)  # 'Yolo' | 'Yolo OBB' | 'Ocr' | 'Classification'
+    type = Column(String, nullable=False)  # 'Yolo' | 'Yolo OBB' | 'Ocr' | 'Classification' | 'Deskewer'
+    ocr_charset = Column(String, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id"))
     created_at = Column(DateTime, default=func.now())
     statut = Column(String, nullable=False, default="activated")
@@ -89,6 +90,26 @@ class OcrPrelabel(Base):
     project_id = Column(Integer, ForeignKey("projects.id"))
     img_name = Column(String, nullable=False)
     value = Column(String, nullable=False)
+
+
+class DeskewerLabel(Base):
+    __tablename__ = "deskewer_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    img_name = Column(String, nullable=False)
+    angle = Column(Integer, nullable=False)
+    crop_box = Column(String, nullable=True)
+
+
+class DeskewerPrelabel(Base):
+    __tablename__ = "deskewer_prelabels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    img_name = Column(String, nullable=False)
+    angle = Column(Integer, nullable=False)
+    crop_box = Column(String, nullable=True)
 
 
 class SkippedImage(Base):

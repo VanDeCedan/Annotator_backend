@@ -27,6 +27,7 @@ def create_project(
     new_project = models.Project(
         name=project_in.name,
         type=project_in.type,
+        ocr_charset=project_in.ocr_charset,
         created_by=current_user.id,
         statut="activated"
     )
@@ -50,6 +51,8 @@ def update_project(
         project.name = project_in.name
     if project_in.type is not None:
         project.type = project_in.type
+    if project_in.ocr_charset is not None:
+        project.ocr_charset = project_in.ocr_charset
         
     db.commit()
     db.refresh(project)

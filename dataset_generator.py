@@ -130,7 +130,9 @@ def generate_dataset_zip(
         Image.Resampling.LANCZOS if hasattr(Image, "Resampling") else Image.LANCZOS
     )
 
-    with zipfile.ZipFile(output_path, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+    zip_target = output_path if output_path else io.BytesIO()
+
+    with zipfile.ZipFile(zip_target, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
 
         total_items = sum(len(sd) for sd in splits.values())
         current_item = 0
@@ -163,6 +165,8 @@ def generate_dataset_zip(
                         pil_img = raw_img.convert("RGB")
                         if project.type in ["Yolo", "Yolo OBB"]:
                             pil_img = composite_box_images(pil_img, img_labels, project.id, project.type)
+                        if getattr(options, "grayscale", False):
+                            pil_img = pil_img.convert("L").convert("RGB")
                         if target_size and not is_crop_mode:
                             pil_img = pil_img.resize(target_size, resample_filter)
 
@@ -272,6 +276,9 @@ def generate_dataset_zip(
             zf.writestr("data.yaml", yaml_content)
 
     # File is closed when 'with' block exits.
+    if output_path is None:
+        zip_target.seek(0)
+        return zip_target
 
 
 

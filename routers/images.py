@@ -30,6 +30,8 @@ async def upload_images(
     for file in files:
         if file.filename:
             file_path = session_dir / file.filename
+            if file_path.exists():
+                continue
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             image_names.append(file.filename)
@@ -122,6 +124,8 @@ async def upload_box_images(
     for file in files:
         if file.filename:
             file_path = box_dir / file.filename
+            if file_path.exists():
+                continue
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             uploaded.append(file.filename)

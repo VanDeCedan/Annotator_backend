@@ -121,6 +121,55 @@ class TestDatasetGeneratorAugmentation(unittest.TestCase):
         self.assertIn("dog/img_0_crop_2.jpg", file_list)
         self.assertNotIn("data.yaml", file_list)
 
+    def test_ocr_dataset_export_grayscale_and_augmentation(self):
+        project = MagicMock(spec=models.Project)
+        project.id = 1
+        project.type = "Ocr"
+
+        labels_data = [
+            ("img_ocr.jpg", "OCR Text Value"),
+        ]
+
+        aug_opts = AugmentationOptions(
+            num_augs=2,
+            ocr_distortion_intensity=5.0,
+            ocr_noise_intensity=3.0,
+            ocr_blur_intensity=2.0,
+        )
+
+        request_opts = DatasetRequest(
+            session_id="test_session_ocr",
+            split_enabled=False,
+            grayscale=True,
+            augmentation=aug_opts,
+        )
+
+        dummy_img = Image.new("RGB", (150, 40), color="white")
+
+        with unittest.mock.patch("dataset_generator.UPLOAD_DIR") as mock_upload:
+            mock_session_dir = MagicMock()
+            mock_upload.__truediv__.return_value.__truediv__.return_value = mock_session_dir
+            mock_path = MagicMock()
+            mock_path.exists.return_value = True
+            mock_session_dir.__truediv__.return_value = mock_path
+
+            with unittest.mock.patch("PIL.Image.open", return_value=dummy_img):
+                zip_io = generate_dataset_zip(
+                    project=project,
+                    session_id="test_session_ocr",
+                    labels_data=labels_data,
+                    class_map={},
+                    options=request_opts
+                )
+
+        with zipfile.ZipFile(zip_io, 'r') as zf:
+            file_list = zf.namelist()
+            self.assertIn("images/img_ocr.jpg", file_list)
+            self.assertIn("labels/img_ocr.txt", file_list)
+            # Should have augmented files
+            self.assertIn("images/img_ocr_aug_1.jpg", file_list)
+            self.assertIn("images/img_ocr_aug_2.jpg", file_list)
+
 if __name__ == '__main__':
     unittest.main()
 
