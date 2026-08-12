@@ -170,6 +170,66 @@ class TestDatasetGeneratorAugmentation(unittest.TestCase):
             self.assertIn("images/img_ocr_aug_1.jpg", file_list)
             self.assertIn("images/img_ocr_aug_2.jpg", file_list)
 
+    def test_deskewer_dataset_export(self):
+        project = MagicMock(spec=models.Project)
+        project.id = 1
+        project.type = "Deskewer"
+
+        labels_data = [
+            ("img_deskew.jpg", (-45, "10,20,100,200")),
+        ]
+
+        aug_opts = AugmentationOptions(
+            num_augs=2,
+            deskew_angles=[15, 30]
+        )
+
+        request_opts = DatasetRequest(
+            session_id="test_session_deskew",
+            split_enabled=False,
+            augmentation=aug_opts,
+        )
+
+        dummy_img = Image.new("RGB", (200, 200), color="blue")
+
+        with unittest.mock.patch("dataset_generator.UPLOAD_DIR") as mock_upload:
+            mock_session_dir = MagicMock()
+            mock_upload.__truediv__.return_value.__truediv__.return_value = mock_session_dir
+            mock_path = MagicMock()
+            mock_path.exists.return_value = True
+            mock_session_dir.__truediv__.return_value = mock_path
+
+            with unittest.mock.patch("PIL.Image.open", return_value=dummy_img):
+                zip_io = generate_dataset_zip(
+                    project=project,
+                    session_id="test_session_deskew",
+                    labels_data=labels_data,
+                    class_map={},
+                    options=request_opts
+                )
+
+        with zipfile.ZipFile(zip_io, 'r') as zf:
+            file_list = zf.namelist()
+            self.assertIn("images/img_deskew.jpg", file_list)
+            self.assertIn("labels/img_deskew.txt", file_list)
+            
+            # Check original label content: angle and crop_box
+            orig_lbl = zf.read("labels/img_deskew.txt").decode().strip()
+            self.assertEqual(orig_lbl, "-45 10,20,100,200")
+            
+            # Should have augmented files
+            self.assertIn("images/img_deskew_aug_1.jpg", file_list)
+            self.assertIn("labels/img_deskew_aug_1.txt", file_list)
+            self.assertIn("images/img_deskew_aug_2.jpg", file_list)
+            self.assertIn("labels/img_deskew_aug_2.txt", file_list)
+            
+            # Check rotated label content (angle - da)
+            lbl_aug1 = zf.read("labels/img_deskew_aug_1.txt").decode().strip()
+            self.assertEqual(lbl_aug1, "-60")
+            
+            lbl_aug2 = zf.read("labels/img_deskew_aug_2.txt").decode().strip()
+            self.assertEqual(lbl_aug2, "-75")
+
 if __name__ == '__main__':
     unittest.main()
 

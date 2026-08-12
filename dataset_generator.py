@@ -155,6 +155,8 @@ def generate_dataset_zip(
                     img_name, class_code = item
                 elif project.type == "Ocr":
                     img_name, value = item
+                elif project.type == "Deskewer":
+                    img_name, (angle, crop_box) = item
 
                 img_path = session_dir / img_name
                 if not img_path.exists():
@@ -239,6 +241,33 @@ def generate_dataset_zip(
                                     )
                                     del aug_img
                                 del aug_results
+                            elif project.type == "Deskewer":
+                                deskew_angles = getattr(options.augmentation, "deskew_angles", [])
+                                if deskew_angles:
+                                    resample_filter = (
+                                        Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
+                                    )
+                                    for idx, da in enumerate(deskew_angles):
+                                        aug_img = pil_img.rotate(da, expand=True, resample=resample_filter)
+                                        new_angle = (angle - da + 180) % 360 - 180
+                                        aug_item = (f"{stem}_aug_{idx+1}.jpg", (new_angle, None))
+                                        _write_to_zip(
+                                            zf, project, aug_img, prefix,
+                                            f"{stem}_aug_{idx+1}", f"{stem}_aug_{idx+1}.jpg",
+                                            aug_item, class_map,
+                                        )
+                                        del aug_img
+                                else:
+                                    aug_results = augment_image_only(pil_img, options.augmentation)
+                                    for aug_img, suffix in aug_results:
+                                        aug_item = (f"{stem}{suffix}.jpg", (angle, crop_box))
+                                        _write_to_zip(
+                                            zf, project, aug_img, prefix,
+                                            f"{stem}{suffix}", f"{stem}{suffix}.jpg",
+                                            aug_item, class_map,
+                                        )
+                                        del aug_img
+                                    del aug_results
                             else:
                                 aug_results = augment_image_only(pil_img, options.augmentation)
                                 for aug_img, suffix in aug_results:
@@ -319,4 +348,12 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
         value = item[1]
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
         zf.writestr(f"{prefix}labels/{stem}.txt", value)
+
+    elif project.type == "Deskewer":
+        angle, crop_box = item[1]
+        zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
+        lbl_content = f"{angle}"
+        if crop_box:
+            lbl_content += f" {crop_box}"
+        zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
 
