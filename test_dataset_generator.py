@@ -211,24 +211,13 @@ class TestDatasetGeneratorAugmentation(unittest.TestCase):
         with zipfile.ZipFile(zip_io, 'r') as zf:
             file_list = zf.namelist()
             self.assertIn("images/img_deskew.jpg", file_list)
-            self.assertIn("labels/img_deskew.txt", file_list)
-            
-            # Check original label content: angle and crop_box
-            orig_lbl = zf.read("labels/img_deskew.txt").decode().strip()
-            self.assertEqual(orig_lbl, "-45 10,20,100,200")
+            self.assertNotIn("labels/img_deskew.txt", file_list)
             
             # Should have augmented files
             self.assertIn("images/img_deskew_aug_1.jpg", file_list)
-            self.assertIn("labels/img_deskew_aug_1.txt", file_list)
+            self.assertNotIn("labels/img_deskew_aug_1.txt", file_list)
             self.assertIn("images/img_deskew_aug_2.jpg", file_list)
-            self.assertIn("labels/img_deskew_aug_2.txt", file_list)
-            
-            # Check rotated label content (angle - da)
-            lbl_aug1 = zf.read("labels/img_deskew_aug_1.txt").decode().strip()
-            self.assertEqual(lbl_aug1, "-60")
-            
-            lbl_aug2 = zf.read("labels/img_deskew_aug_2.txt").decode().strip()
-            self.assertEqual(lbl_aug2, "-75")
+            self.assertNotIn("labels/img_deskew_aug_2.txt", file_list)
 
 if __name__ == '__main__':
     unittest.main()

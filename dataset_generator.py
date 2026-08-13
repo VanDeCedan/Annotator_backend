@@ -167,6 +167,30 @@ def generate_dataset_zip(
                         pil_img = raw_img.convert("RGB")
                         if project.type in ["Yolo", "Yolo OBB"]:
                             pil_img = composite_box_images(pil_img, img_labels, project.id, project.type)
+                        elif project.type == "Deskewer":
+                            # Crop the original image first using the crop_box coordinates
+                            if crop_box:
+                                try:
+                                    x, y, w, h = map(float, crop_box.split(','))
+                                    img_w, img_h = pil_img.size
+                                    left = int(round(x * img_w))
+                                    top = int(round(y * img_h))
+                                    right = int(round((x + w) * img_w))
+                                    bottom = int(round((y + h) * img_h))
+                                    left = max(0, min(left, img_w))
+                                    top = max(0, min(top, img_h))
+                                    right = max(0, min(right, img_w))
+                                    bottom = max(0, min(bottom, img_h))
+                                    if right > left and bottom > top:
+                                        pil_img = pil_img.crop((left, top, right, bottom))
+                                except Exception as crop_err:
+                                    print(f"Error cropping deskewer image {img_name}: {crop_err}")
+                            # Rotate the image to straighten it.
+                            # CSS rotate(+Ndeg) is clockwise; PIL.rotate(+N) is counter-clockwise,
+                            # so we negate the angle to match what the annotator saw on screen.
+                            if angle != 0:
+                                resample_filter_rot = Image.Resampling.BICUBIC if hasattr(Image, "Resampling") else Image.BICUBIC
+                                pil_img = pil_img.rotate(-angle, expand=True, resample=resample_filter_rot)
                         if getattr(options, "grayscale", False):
                             pil_img = pil_img.convert("L").convert("RGB")
                         if target_size and not is_crop_mode:
@@ -224,7 +248,11 @@ def generate_dataset_zip(
 
                     else:
                         # Write original image + labels
-                        _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
+                        if project.type == "Deskewer":
+                            deskewed_item = (img_name, (0, None))
+                            _write_to_zip(zf, project, pil_img, prefix, stem, img_name, deskewed_item, class_map)
+                        else:
+                            _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
 
                         # Augmentations: only for training split
                         if options.augmentation and split_name in ["train", ""]:
@@ -249,7 +277,8 @@ def generate_dataset_zip(
                                     )
                                     for idx, da in enumerate(deskew_angles):
                                         aug_img = pil_img.rotate(da, expand=True, resample=resample_filter)
-                                        new_angle = (angle - da + 180) % 360 - 180
+                                        # Since pil_img is already deskewed (straight), the new straightening angle is -da
+                                        new_angle = (-da + 180) % 360 - 180
                                         aug_item = (f"{stem}_aug_{idx+1}.jpg", (new_angle, None))
                                         _write_to_zip(
                                             zf, project, aug_img, prefix,
@@ -260,7 +289,7 @@ def generate_dataset_zip(
                                 else:
                                     aug_results = augment_image_only(pil_img, options.augmentation)
                                     for aug_img, suffix in aug_results:
-                                        aug_item = (f"{stem}{suffix}.jpg", (angle, crop_box))
+                                        aug_item = (f"{stem}{suffix}.jpg", (0, None))
                                         _write_to_zip(
                                             zf, project, aug_img, prefix,
                                             f"{stem}{suffix}", f"{stem}{suffix}.jpg",
@@ -350,10 +379,6 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
         zf.writestr(f"{prefix}labels/{stem}.txt", value)
 
     elif project.type == "Deskewer":
-        angle, crop_box = item[1]
+        # Deskewer projects only export the deskewed images; label files are not generated.
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
-        lbl_content = f"{angle}"
-        if crop_box:
-            lbl_content += f" {crop_box}"
-        zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
 
