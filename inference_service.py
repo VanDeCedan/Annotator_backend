@@ -136,6 +136,102 @@ def postprocess_yolo(preds, conf_thres, iou_thres, orig_shape, ratio, pad):
             })
     return results
 
+def postprocess_yolo_obb(preds, conf_thres, iou_thres, orig_shape, ratio, pad):
+    results = []
+    
+    if preds.ndim == 3 and preds.shape[-1] == 7 and preds.shape[1] < 1000:
+        # ALREADY NMS-ED! shape [1, 300, 7]
+        for row in preds[0]:
+            cx, cy, w, h, conf, class_id, angle = row
+            if conf >= conf_thres:
+                corners = np.array([
+                    [-w/2, -h/2],
+                    [w/2, -h/2],
+                    [w/2, h/2],
+                    [-w/2, h/2]
+                ])
+                R = np.array([
+                    [np.cos(angle), -np.sin(angle)],
+                    [np.sin(angle), np.cos(angle)]
+                ])
+                poly_padded = corners @ R.T + np.array([cx, cy])
+                
+                poly_orig = np.zeros_like(poly_padded)
+                poly_orig[:, 0] = (poly_padded[:, 0] - pad[0]) / ratio[0]
+                poly_orig[:, 1] = (poly_padded[:, 1] - pad[1]) / ratio[1]
+                
+                poly_orig[:, 0] = np.clip(poly_orig[:, 0], 0, orig_shape[1])
+                poly_orig[:, 1] = np.clip(poly_orig[:, 1], 0, orig_shape[0])
+                
+                coords_list = poly_orig.tolist()
+                
+                results.append({
+                    "class_code": int(class_id),
+                    "coordinates": json.dumps(coords_list)
+                })
+        return results
+
+    # NOT NMS-ED!
+    preds = np.squeeze(preds)
+    if len(preds.shape) == 2 and preds.shape[0] < preds.shape[1]:
+        preds = preds.transpose()
+        
+    boxes_for_nms = []
+    confidences = []
+    class_ids = []
+    angles = []
+    
+    for row in preds:
+        if len(row) >= 6:
+            cx, cy, w, h = row[:4]
+            scores = row[4:-1]
+            angle = row[-1]
+            
+            class_id = np.argmax(scores)
+            conf = scores[class_id]
+            
+            if conf >= conf_thres:
+                angle_deg = angle * 180.0 / np.pi
+                boxes_for_nms.append(((float(cx), float(cy)), (float(w), float(h)), float(angle_deg)))
+                confidences.append(float(conf))
+                class_ids.append(int(class_id))
+                angles.append(float(angle))
+                
+    if len(boxes_for_nms) > 0:
+        indices = cv2.dnn.NMSBoxesRotated(boxes_for_nms, confidences, conf_thres, iou_thres)
+        if len(indices) > 0:
+            for i in indices.flatten():
+                (cx, cy), (w, h), _ = boxes_for_nms[i]
+                angle = angles[i]
+                class_id = class_ids[i]
+                
+                corners = np.array([
+                    [-w/2, -h/2],
+                    [w/2, -h/2],
+                    [w/2, h/2],
+                    [-w/2, h/2]
+                ])
+                R = np.array([
+                    [np.cos(angle), -np.sin(angle)],
+                    [np.sin(angle), np.cos(angle)]
+                ])
+                poly_padded = corners @ R.T + np.array([cx, cy])
+                
+                poly_orig = np.zeros_like(poly_padded)
+                poly_orig[:, 0] = (poly_padded[:, 0] - pad[0]) / ratio[0]
+                poly_orig[:, 1] = (poly_padded[:, 1] - pad[1]) / ratio[1]
+                
+                poly_orig[:, 0] = np.clip(poly_orig[:, 0], 0, orig_shape[1])
+                poly_orig[:, 1] = np.clip(poly_orig[:, 1], 0, orig_shape[0])
+                
+                coords_list = poly_orig.tolist()
+                
+                results.append({
+                    "class_code": int(class_id),
+                    "coordinates": json.dumps(coords_list)
+                })
+    return results
+
 def run_yolo_inference_stream(project_id: int, model_path: str):
     db = SessionLocal()
     try:
@@ -157,13 +253,50 @@ def run_yolo_inference_stream(project_id: int, model_path: str):
         input_name = session.get_inputs()[0].name
         input_shape = session.get_inputs()[0].shape
         
-        # Determine image size from model or default to 640
-        imgsz = 640
-        if len(input_shape) == 4 and isinstance(input_shape[2], int):
-            imgsz = input_shape[2]
-            
+        # Determine image size from model or default
         project_dir = DATA_DIR / str(project_id)
-        
+        imgsz = None
+        if project.model_img_h and int(project.model_img_h) > 0:
+            imgsz = int(project.model_img_h)
+        else:
+            h_in = input_shape[2] if len(input_shape) == 4 else None
+            if isinstance(h_in, int) and h_in > 0:
+                imgsz = h_in
+            elif project.type == "Yolo OBB":
+                # Dynamic axes — auto-probe using the first available image
+                probe_path = str(project_dir / target_images[0]) if target_images else None
+                if probe_path:
+                    probe_bgr = cv2.imread(probe_path)
+                    if probe_bgr is not None:
+                        probe_img = cv2.cvtColor(probe_bgr, cv2.COLOR_BGR2RGB)
+                        best_imgsz = 640
+                        best_conf = -1.0
+                        for candidate in [640, 1024, 512, 800, 1280]:
+                            try:
+                                pr = cv2.resize(probe_img, (candidate, candidate))
+                                t = pr.transpose((2, 0, 1))
+                                t = np.ascontiguousarray(t, dtype=np.float32) / 255.0
+                                t = np.expand_dims(t, axis=0)
+                                out = session.run(None, {input_name: t})[0]
+                                if out.ndim == 3 and out.shape[1] < 1000 and out.shape[-1] >= 5:
+                                    max_conf = float(np.max(out[0, :, 4]))
+                                elif out.ndim == 3:
+                                    arr = out[0]
+                                    if arr.shape[0] < arr.shape[1]:
+                                        max_conf = float(np.max(arr[4:, :]))
+                                    else:
+                                        max_conf = float(np.max(arr[:, 4:]))
+                                else:
+                                    max_conf = 0.0
+                                if max_conf > best_conf:
+                                    best_conf = max_conf
+                                    best_imgsz = candidate
+                            except Exception:
+                                pass
+                        imgsz = best_imgsz
+            if imgsz is None:
+                imgsz = 640
+            
         for img_name in target_images:
             img_path = project_dir / img_name
             img = cv2.imread(str(img_path))
@@ -181,7 +314,10 @@ def run_yolo_inference_stream(project_id: int, model_path: str):
             outputs = session.run(None, {input_name: img_tensor})
             predictions = outputs[0]
             
-            results = postprocess_yolo(predictions, 0.25, 0.45, orig_shape, ratio, pad)
+            if project.type == "Yolo OBB":
+                results = postprocess_yolo_obb(predictions, 0.25, 0.45, orig_shape, ratio, pad)
+            else:
+                results = postprocess_yolo(predictions, 0.25, 0.45, orig_shape, ratio, pad)
             
             img_stem = Path(img_name).stem
             

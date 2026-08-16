@@ -28,6 +28,10 @@ def create_project(
         name=project_in.name,
         type=project_in.type,
         ocr_charset=project_in.ocr_charset,
+        dbnet_model_path=project_in.dbnet_model_path,
+        ocr_enable_class=project_in.ocr_enable_class,
+        model_img_h=str(project_in.model_img_h) if project_in.model_img_h is not None else None,
+        model_img_w=str(project_in.model_img_w) if project_in.model_img_w is not None else None,
         created_by=current_user.id,
         statut="activated"
     )
@@ -47,12 +51,22 @@ def update_project(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
         
-    if project_in.name is not None:
-        project.name = project_in.name
-    if project_in.type is not None:
-        project.type = project_in.type
-    if project_in.ocr_charset is not None:
-        project.ocr_charset = project_in.ocr_charset
+    update_data = project_in.model_dump(exclude_unset=True)
+    
+    if "name" in update_data:
+        project.name = update_data["name"]
+    if "type" in update_data:
+        project.type = update_data["type"]
+    if "ocr_charset" in update_data:
+        project.ocr_charset = update_data["ocr_charset"]
+    if "dbnet_model_path" in update_data:
+        project.dbnet_model_path = update_data["dbnet_model_path"]
+    if "ocr_enable_class" in update_data:
+        project.ocr_enable_class = update_data["ocr_enable_class"]
+    if "model_img_h" in update_data:
+        project.model_img_h = str(update_data["model_img_h"]) if update_data["model_img_h"] is not None else None
+    if "model_img_w" in update_data:
+        project.model_img_w = str(update_data["model_img_w"]) if update_data["model_img_w"] is not None else None
         
     db.commit()
     db.refresh(project)
@@ -91,6 +105,11 @@ def delete_project(
     db.query(models.ClassificationPrelabel).filter(models.ClassificationPrelabel.project_id == project_id).delete()
     db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id).delete()
     db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id).delete()
+    db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id).delete()
+    db.query(models.DeskewerPrelabel).filter(models.DeskewerPrelabel.project_id == project_id).delete()
+    db.query(models.KIELabel).filter(models.KIELabel.project_id == project_id).delete()
+    db.query(models.KIEPrelabel).filter(models.KIEPrelabel.project_id == project_id).delete()
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id).delete()
     db.query(models.Class).filter(models.Class.project_id == project_id).delete()
     db.delete(project)
     db.commit()

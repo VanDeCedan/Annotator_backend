@@ -24,8 +24,12 @@ class UserOut(UserBase):
 # --- Project Schemas ---
 class ProjectBase(BaseModel):
     name: str
-    type: str  # Yolo | Yolo OBB | Ocr | Classification | Deskewer
+    type: str  # Yolo | Yolo OBB | Ocr | Classification | Deskewer | KIE
     ocr_charset: Optional[str] = None
+    dbnet_model_path: Optional[str] = None
+    ocr_enable_class: Optional[bool] = False
+    model_img_h: Optional[int] = None
+    model_img_w: Optional[int] = None
 
 class ProjectCreate(ProjectBase):
     pass
@@ -34,6 +38,10 @@ class ProjectUpdate(BaseModel):
     name: Optional[str] = None
     type: Optional[str] = None
     ocr_charset: Optional[str] = None
+    dbnet_model_path: Optional[str] = None
+    ocr_enable_class: Optional[bool] = None
+    model_img_h: Optional[int] = None
+    model_img_w: Optional[int] = None
 
 class ProjectOut(ProjectBase):
     id: int
@@ -78,6 +86,7 @@ class ClassificationLabelRequest(BaseModel):
 class OcrLabelRequest(BaseModel):
     img_name: str
     value: str
+    class_code: Optional[int] = -1
 
 class DeskewerLabelRequest(BaseModel):
     img_name: str
@@ -86,6 +95,16 @@ class DeskewerLabelRequest(BaseModel):
 
 class SkipImageRequest(BaseModel):
     img_name: str
+
+class KIELabelItem(BaseModel):
+    class_code: int
+    coordinates: str
+    text_value: Optional[str] = ""
+    box_image: Optional[str] = None
+
+class KIELabelRequest(BaseModel):
+    img_name: str
+    labels: List[KIELabelItem]
 
 # --- Token Schemas ---
 class Token(BaseModel):
@@ -111,6 +130,7 @@ class AugmentationOptions(BaseModel):
     ocr_distortion_intensity: float = 0.0
     ocr_noise_intensity: float = 0.0
     ocr_blur_intensity: float = 0.0
+    include_aug_in_val: bool = False
 
 class DatasetRequest(BaseModel):
     session_id: str
@@ -124,4 +144,8 @@ class DatasetRequest(BaseModel):
     val_pct: float = 20.0
     test_pct: float = 10.0
     yolo_version: str = "v8"
+    kie_export_format: Optional[str] = "dbnet"
+    yolo_export_format: Optional[str] = "yolo"  # "yolo" | "dbnet"
+    ocr_export_format: Optional[str] = "ocr"   # "ocr" | "vit"
+
 

@@ -57,12 +57,24 @@ async def generate_dataset(
     elif project.type == "Ocr":
         db_labels = db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id).all()
         for l in db_labels:
-            labels_data.append((l.img_name, l.value))
+            labels_data.append((l.img_name, (l.value, getattr(l, "class_code", -1))))
 
     elif project.type == "Deskewer":
         db_labels = db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id).all()
         for l in db_labels:
             labels_data.append((l.img_name, (l.angle, l.crop_box)))
+
+    elif project.type == "KIE":
+        db_labels = db.query(models.KIELabel).filter(models.KIELabel.project_id == project_id).all()
+        grouped = {}
+        for l in db_labels:
+            if l.img_name not in grouped:
+                grouped[l.img_name] = []
+            if l.class_code != -1:
+                grouped[l.img_name].append((l.class_code, [float(x) for x in l.coordinates.split()], l.text_value))
+                
+        for img_name, lbls in grouped.items():
+            labels_data.append((img_name, lbls))
 
     if not labels_data:
         raise HTTPException(status_code=400, detail="No labeled data found for this project")
@@ -103,3 +115,4 @@ async def generate_dataset(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+

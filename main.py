@@ -11,7 +11,7 @@ Base.metadata.create_all(bind=engine)
 
 def auto_migrate_schema():
     with engine.connect() as conn:
-        for model in [models.YoloLabel, models.YoloPrelabel, models.Project]:
+        for model in [models.YoloLabel, models.YoloPrelabel, models.Project, models.OcrLabel, models.OcrPrelabel]:
             table_name = model.__tablename__
             try:
                 res = conn.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
@@ -19,7 +19,8 @@ def auto_migrate_schema():
                 if existing_cols:
                     for col_name, col_obj in model.__table__.columns.items():
                         if col_name not in existing_cols:
-                            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} VARCHAR"))
+                            col_type = "BOOLEAN" if col_name == "ocr_enable_class" else "INTEGER" if col_name == "class_code" else "VARCHAR"
+                            conn.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {col_name} {col_type}"))
                             conn.commit()
             except Exception as e:
                 print(f"Auto-migration info for {table_name}: {e}")

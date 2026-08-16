@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import distinct
 from database import get_db
 from dependencies import get_current_user, require_role
-from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, DeskewerLabelRequest, SkipImageRequest
+from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, DeskewerLabelRequest, SkipImageRequest, KIELabelRequest
 from typing import Union
 from pathlib import Path
 import models
@@ -31,6 +31,14 @@ def get_labels(
              return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates, "box_image": getattr(l, 'box_image', None)} for l in labels if l.class_code != -1], "prelabels": [{"class_code": p.class_code, "coordinates": p.coordinates, "box_image": getattr(p, 'box_image', None)} for p in prelabels]}
         return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates, "box_image": getattr(l, 'box_image', None)} for l in labels if l.class_code != -1], "prelabels": []}
              
+    elif project.type == "KIE":
+        labels = db.query(models.KIELabel).filter(models.KIELabel.project_id == project_id, models.KIELabel.img_name == img_name).all()
+        if not labels:
+             img_stem = Path(img_name).stem
+             prelabels = db.query(models.KIEPrelabel).filter(models.KIEPrelabel.project_id == project_id, models.KIEPrelabel.img_name == img_stem).all()
+             return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates, "text_value": l.text_value, "box_image": getattr(l, 'box_image', None)} for l in labels if l.class_code != -1], "prelabels": [{"class_code": p.class_code, "coordinates": p.coordinates, "text_value": p.text_value, "box_image": getattr(p, 'box_image', None)} for p in prelabels]}
+        return {"type": project.type, "labels": [{"class_code": l.class_code, "coordinates": l.coordinates, "text_value": l.text_value, "box_image": getattr(l, 'box_image', None)} for l in labels if l.class_code != -1], "prelabels": []}
+             
     elif project.type == "Classification":
         label = db.query(models.ClassificationLabel).filter(models.ClassificationLabel.project_id == project_id, models.ClassificationLabel.img_name == img_name).first()
         if not label:
@@ -44,8 +52,20 @@ def get_labels(
         if not label:
             img_stem = Path(img_name).stem
             prelabel = db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id, models.OcrPrelabel.img_name == img_stem).first()
-            return {"type": project.type, "label": None, "prelabel": prelabel.value if prelabel else None}
-        return {"type": project.type, "label": label.value, "prelabel": None}
+            return {
+                "type": project.type,
+                "label": None,
+                "class_code": -1,
+                "prelabel": prelabel.value if prelabel else None,
+                "prelabel_class_code": prelabel.class_code if prelabel else -1
+            }
+        return {
+            "type": project.type,
+            "label": label.value,
+            "class_code": getattr(label, "class_code", -1),
+            "prelabel": None,
+            "prelabel_class_code": -1
+        }
         
     elif project.type == "Deskewer":
         label = db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id, models.DeskewerLabel.img_name == img_name).first()
@@ -71,6 +91,29 @@ def save_yolo_labels(
     if not new_labels:
         # Insert a dummy record to indicate the image was annotated as background
         new_labels.append(models.YoloLabel(project_id=project_id, img_name=request.img_name, class_code=-1, coordinates="", box_image=None))
+        
+    if new_labels:
+        db.bulk_save_objects(new_labels)
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
+    db.commit()
+    return {"message": "Saved"}
+
+@router.post("/kie")
+def save_kie_labels(
+    project_id: int,
+    request: KIELabelRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "annotator"))
+):
+    db.query(models.KIELabel).filter(models.KIELabel.project_id == project_id, models.KIELabel.img_name == request.img_name).delete()
+    
+    new_labels = [
+        models.KIELabel(project_id=project_id, img_name=request.img_name, class_code=l.class_code, coordinates=l.coordinates, text_value=l.text_value, box_image=l.box_image)
+        for l in request.labels
+    ]
+    if not new_labels:
+        # Insert a dummy record to indicate the image was annotated as background
+        new_labels.append(models.KIELabel(project_id=project_id, img_name=request.img_name, class_code=-1, coordinates="", text_value="", box_image=None))
         
     if new_labels:
         db.bulk_save_objects(new_labels)
@@ -112,7 +155,12 @@ def save_ocr_label(
             )
 
     db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id, models.OcrLabel.img_name == request.img_name).delete()
-    new_label = models.OcrLabel(project_id=project_id, img_name=request.img_name, value=request.value)
+    new_label = models.OcrLabel(
+        project_id=project_id,
+        img_name=request.img_name,
+        value=request.value,
+        class_code=getattr(request, "class_code", -1)
+    )
     db.add(new_label)
     db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
     db.commit()
@@ -168,6 +216,8 @@ def get_progress(
          labeled_images = [r[0] for r in db.query(models.OcrLabel.img_name).filter(models.OcrLabel.project_id == project_id).distinct().all()]
     elif project.type == "Deskewer":
          labeled_images = [r[0] for r in db.query(models.DeskewerLabel.img_name).filter(models.DeskewerLabel.project_id == project_id).distinct().all()]
+    elif project.type == "KIE":
+         labeled_images = [r[0] for r in db.query(models.KIELabel.img_name).filter(models.KIELabel.project_id == project_id).distinct().all()]
          
     skipped_images = [r[0] for r in db.query(models.SkippedImage.img_name).filter(models.SkippedImage.project_id == project_id).distinct().all()]
     
@@ -176,3 +226,4 @@ def get_progress(
         "labeled_count": len(labeled_images),
         "skipped_images": skipped_images
     }
+

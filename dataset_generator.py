@@ -9,7 +9,7 @@ import models
 from schemas import DatasetRequest
 from augmentation import augment_image_and_labels, augment_image_only
 from routers.images import UPLOAD_DIR
-
+import json
 
 import math
 
@@ -102,6 +102,11 @@ def generate_dataset_zip(
             pass
 
     # 2. Split
+    is_dbnet_format = (
+        (project.type == "KIE" and getattr(options, "kie_export_format", "dbnet") == "dbnet") or
+        (project.type in ["Yolo", "Yolo OBB"] and getattr(options, "yolo_export_format", "yolo") == "dbnet")
+    )
+
     splits = {"": labels_data}
     if options.split_enabled:
         total = options.train_pct + options.val_pct + options.test_pct
@@ -119,9 +124,11 @@ def generate_dataset_zip(
         train_c = int(round(n * (train_pct / 100.0)))
         val_c = int(round(n * (val_pct / 100.0)))
 
+        val_key = "val" if is_dbnet_format else "valid"
+
         splits = {
             "train": shuffled[:train_c],
-            "valid": shuffled[train_c:train_c + val_c],
+            val_key: shuffled[train_c:train_c + val_c],
             "test": shuffled[train_c + val_c:],
         }
 
@@ -133,6 +140,8 @@ def generate_dataset_zip(
     zip_target = output_path if output_path else io.BytesIO()
 
     with zipfile.ZipFile(zip_target, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
+        split_images_collected = {}
+        vit_rows_collected = {}
 
         total_items = sum(len(sd) for sd in splits.values())
         current_item = 0
@@ -149,12 +158,17 @@ def generate_dataset_zip(
                     progress_callback(current_item, total_items)
 
                 # Unpack per project type
-                if project.type in ["Yolo", "Yolo OBB"]:
+                if project.type in ["Yolo", "Yolo OBB", "KIE"]:
                     img_name, img_labels = item
                 elif project.type == "Classification":
                     img_name, class_code = item
                 elif project.type == "Ocr":
-                    img_name, value = item
+                    img_name, ocr_val = item
+                    if isinstance(ocr_val, tuple):
+                        value, class_code = ocr_val
+                    else:
+                        value, class_code = ocr_val, -1
+                    item = (img_name, (value, class_code))
                 elif project.type == "Deskewer":
                     img_name, (angle, crop_box) = item
 
@@ -235,7 +249,7 @@ def generate_dataset_zip(
                                 zf, crop_img, f"{prefix}{class_name}/{crop_stem}.jpg"
                             )
 
-                            if options.augmentation and split_name in ["train", ""]:
+                            if options.augmentation and (split_name in ["train", ""] or (split_name in ["val", "valid"] and getattr(options.augmentation, "include_aug_in_val", False))):
                                 aug_results = augment_image_only(crop_img, options.augmentation)
                                 for aug_img, suffix in aug_results:
                                     _write_single_image_to_zip(
@@ -252,11 +266,11 @@ def generate_dataset_zip(
                             deskewed_item = (img_name, (0, None))
                             _write_to_zip(zf, project, pil_img, prefix, stem, img_name, deskewed_item, class_map)
                         else:
-                            _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
+                            _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map, options, split_name, split_images_collected, vit_rows_collected)
 
                         # Augmentations: only for training split
-                        if options.augmentation and split_name in ["train", ""]:
-                            if project.type in ["Yolo", "Yolo OBB"]:
+                        if options.augmentation and (split_name in ["train", ""] or (split_name in ["val", "valid"] and getattr(options.augmentation, "include_aug_in_val", False))):
+                            if project.type in ["Yolo", "Yolo OBB", "KIE"]:
                                 aug_results = augment_image_and_labels(
                                     pil_img, img_labels, project.type, options.augmentation
                                 )
@@ -266,6 +280,7 @@ def generate_dataset_zip(
                                         zf, project, aug_img, prefix,
                                         f"{stem}{suffix}", f"{stem}{suffix}.jpg",
                                         aug_item, class_map,
+                                        options, split_name, split_images_collected
                                     )
                                     del aug_img
                                 del aug_results
@@ -308,6 +323,7 @@ def generate_dataset_zip(
                                         zf, project, aug_img, prefix,
                                         f"{stem}{suffix}", f"{stem}{suffix}.jpg",
                                         aug_item, class_map,
+                                        options, split_name, split_images_collected, vit_rows_collected
                                     )
                                     del aug_img
                                 del aug_results
@@ -318,8 +334,8 @@ def generate_dataset_zip(
                 except Exception as e:
                     print(f"Error processing {img_name}: {e}")
 
-        # Add data.yaml for YOLO projects in full export mode
-        if project.type in ["Yolo", "Yolo OBB"] and not is_crop_mode:
+        # Add data.yaml for YOLO projects in full export mode (except for DBNet format)
+        if project.type in ["Yolo", "Yolo OBB"] and not is_crop_mode and not is_dbnet_format:
             classes_list = [class_map[k] for k in sorted(class_map.keys())]
             names_str = "[" + ", ".join([f"'{n}'" for n in classes_list]) + "]"
 
@@ -332,6 +348,38 @@ def generate_dataset_zip(
                 f"names: {names_str}\n"
             )
             zf.writestr("data.yaml", yaml_content)
+
+        # Write list files if (KIE and format is dbnet) or (Yolo/Yolo OBB and format is dbnet)
+        if is_dbnet_format and split_images_collected:
+            for split_name, images in split_images_collected.items():
+                if not images:
+                    continue
+                disp_split = "val" if split_name in ["valid", "val"] else split_name
+                prefix = f"{split_name}/" if split_name else ""
+                
+                # Write prefix/db_{disp_split}_list.txt or db_dataset_list.txt
+                list_name = f"db_{disp_split}_list.txt" if disp_split else "db_dataset_list.txt"
+                list_content = "\n".join(f"images/{img}" for img in images)
+                zf.writestr(f"{prefix}{list_name}", list_content)
+
+        # Write ViT CSV files if OCR and vit format
+        if project.type == "Ocr" and getattr(options, "ocr_export_format", "ocr") == "vit" and vit_rows_collected:
+            import csv
+            for split_name, rows in vit_rows_collected.items():
+                if not rows:
+                    continue
+                prefix = f"{split_name}/" if split_name else ""
+                csv_io = io.StringIO()
+                writer = csv.writer(csv_io)
+                # Header
+                writer.writerow(["chemin_image_decoupee", "texte", "classe"])
+                for row in rows:
+                    writer.writerow(row)
+                
+                # Write csv to zip
+                csv_filename = f"{prefix}dataset.csv"
+                zf.writestr(csv_filename, csv_io.getvalue())
+                csv_io.close()
 
     # File is closed when 'with' block exits.
     if output_path is None:
@@ -348,7 +396,7 @@ def _write_single_image_to_zip(zf, pil_img, zip_path):
     img_byte_arr.close()
 
 
-def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map):
+def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map, options=None, split_name="", split_images_collected=None, vit_rows_collected=None):
     """Encode *pil_img* to JPEG bytes and write image + label into the zip."""
     img_byte_arr = io.BytesIO()
     pil_img.save(img_byte_arr, format="JPEG", quality=95)
@@ -357,15 +405,43 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
 
     if project.type in ["Yolo", "Yolo OBB"]:
         img_labels = item[1]
-        zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
-
-        lbl_content = ""
-        for lbl in img_labels:
-            c_code = lbl[0]
-            coords = lbl[1]
-            coords_str = " ".join(f"{c:.6f}" for c in coords)
-            lbl_content += f"{c_code} {coords_str}\n"
-        zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
+        if getattr(options, "yolo_export_format", "yolo") == "dbnet":
+            zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
+            img_w, img_h = pil_img.size
+            lines = []
+            for lbl in img_labels:
+                c_code = lbl[0]
+                coords = lbl[1]
+                if len(coords) >= 4:
+                    cx, cy, w, h = coords[:4]
+                    x_min = int(round((cx - w / 2.0) * img_w))
+                    y_min = int(round((cy - h / 2.0) * img_h))
+                    x_max = int(round((cx + w / 2.0) * img_w))
+                    y_max = int(round((cy + h / 2.0) * img_h))
+                    
+                    x_min = max(0, min(x_min, img_w))
+                    y_min = max(0, min(y_min, img_h))
+                    x_max = max(0, min(x_max, img_w))
+                    y_max = max(0, min(y_max, img_h))
+                    
+                    class_name = class_map.get(c_code, f"class_{c_code}")
+                    lines.append(f"{x_min},{y_min},{x_max},{y_min},{x_max},{y_max},{x_min},{y_max},{class_name}")
+            zf.writestr(f"{prefix}gt/{stem}.txt", "\n".join(lines))
+            
+            # Record for lists
+            if split_images_collected is not None:
+                if split_name not in split_images_collected:
+                    split_images_collected[split_name] = []
+                split_images_collected[split_name].append(f"{stem}.jpg")
+        else:
+            zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
+            lbl_content = ""
+            for lbl in img_labels:
+                c_code = lbl[0]
+                coords = lbl[1]
+                coords_str = " ".join(f"{c:.6f}" for c in coords)
+                lbl_content += f"{c_code} {coords_str}\n"
+            zf.writestr(f"{prefix}labels/{stem}.txt", lbl_content)
 
     elif project.type == "Classification":
         class_code = item[1]
@@ -374,11 +450,165 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map)
         zf.writestr(f"{prefix}{class_name}/{stem}.jpg", img_bytes)
 
     elif project.type == "Ocr":
-        value = item[1]
-        zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
-        zf.writestr(f"{prefix}labels/{stem}.txt", value)
+        if isinstance(item[1], tuple):
+            value, class_code = item[1]
+        else:
+            value, class_code = item[1], -1
+            
+        if getattr(options, "ocr_export_format", "ocr") == "vit":
+            zf.writestr(f"{prefix}crops/{stem}.jpg", img_bytes)
+            class_name = class_map.get(class_code, f"class_{class_code}") if class_code != -1 else ""
+            if vit_rows_collected is not None:
+                if split_name not in vit_rows_collected:
+                    vit_rows_collected[split_name] = []
+                img_zip_path = f"{prefix}crops/{stem}.jpg"
+                vit_rows_collected[split_name].append((img_zip_path, value, class_name))
+        else:
+            zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
+            zf.writestr(f"{prefix}labels/{stem}.txt", value)
 
     elif project.type == "Deskewer":
         # Deskewer projects only export the deskewed images; label files are not generated.
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
+        
+    elif project.type == "KIE":
+        img_labels = item[1]
+        zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
+        img_w, img_h = pil_img.size
+        
+        # 1. DBNet Format
+        if getattr(options, "kie_export_format", "dbnet") == "dbnet":
+            lines = []
+            for lbl in img_labels:
+                c_code = lbl[0]
+                coords = lbl[1]
+                if len(coords) >= 4:
+                    cx, cy, w, h = coords[:4]
+                    x_min = int(round((cx - w / 2.0) * img_w))
+                    y_min = int(round((cy - h / 2.0) * img_h))
+                    x_max = int(round((cx + w / 2.0) * img_w))
+                    y_max = int(round((cy + h / 2.0) * img_h))
+                    
+                    x_min = max(0, min(x_min, img_w))
+                    y_min = max(0, min(y_min, img_h))
+                    x_max = max(0, min(x_max, img_w))
+                    y_max = max(0, min(y_max, img_h))
+                    
+                    class_name = class_map.get(c_code, f"class_{c_code}")
+                    lines.append(f"{x_min},{y_min},{x_max},{y_min},{x_max},{y_max},{x_min},{y_max},{class_name}")
+            zf.writestr(f"{prefix}gt/{stem}.txt", "\n".join(lines))
+            
+            # Record for lists
+            if split_name not in split_images_collected:
+                split_images_collected[split_name] = []
+            split_images_collected[split_name].append(f"{stem}.jpg")
+
+        # 2. Spatial KIE Format
+        else:
+            boxes_list = []
+            for idx, lbl in enumerate(img_labels):
+                c_code = lbl[0]
+                coords = lbl[1]
+                text_val = lbl[2] if len(lbl) > 2 else ""
+                class_name = class_map.get(c_code, f"class_{c_code}")
+                if len(coords) >= 4:
+                    cx, cy, w, h = coords[:4]
+                    x_min = round(max(0.0, min(cx - w / 2.0, 1.0)), 6)
+                    y_min = round(max(0.0, min(cy - h / 2.0, 1.0)), 6)
+                    x_max = round(max(0.0, min(cx + w / 2.0, 1.0)), 6)
+                    y_max = round(max(0.0, min(cy + h / 2.0, 1.0)), 6)
+                    boxes_list.append({
+                        "index": idx,
+                        "class_code": c_code,
+                        "class_name": class_name,
+                        "text_value": text_val,
+                        "cx": round(cx, 6),
+                        "cy": round(cy, 6),
+                        "w": round(w, 6),
+                        "h": round(h, 6),
+                        "x_min": x_min,
+                        "y_min": y_min,
+                        "x_max": x_max,
+                        "y_max": y_max
+                    })
+                    
+            annotations = []
+            for b in boxes_list:
+                left_neighbor = None
+                right_neighbor = None
+                up_neighbor = None
+                down_neighbor = None
+                
+                min_d_left = float('inf')
+                min_d_right = float('inf')
+                min_d_up = float('inf')
+                min_d_down = float('inf')
+                
+                for other in boxes_list:
+                    if other["index"] == b["index"]:
+                        continue
+                    
+                    dx = other["cx"] - b["cx"]
+                    dy = other["cy"] - b["cy"]
+                    dist = (dx**2 + dy**2)**0.5
+                    
+                    if dx < 0 and abs(dy) <= abs(dx): # Left
+                        if dist < min_d_left:
+                            min_d_left = dist
+                            left_neighbor = other
+                    elif dx > 0 and abs(dy) <= abs(dx): # Right
+                        if dist < min_d_right:
+                            min_d_right = dist
+                            right_neighbor = other
+                    elif dy < 0 and abs(dx) < abs(dy): # Up
+                        if dist < min_d_up:
+                            min_d_up = dist
+                            up_neighbor = other
+                    elif dy > 0 and abs(dx) < abs(dy): # Down
+                        if dist < min_d_down:
+                            min_d_down = dist
+                            down_neighbor = other
+                            
+                def make_relation(nb, dist):
+                    if nb is None:
+                        return None
+                    return {
+                        "box_index": nb["index"],
+                        "distance": round(dist, 6),
+                        "w": nb["w"],
+                        "h": nb["h"],
+                        "class_name": nb["class_name"]
+                    }
+                    
+                annotations.append({
+                    "box_index": b["index"],
+                    "class_code": b["class_code"],
+                    "class_name": b["class_name"],
+                    "text_value": b["text_value"],
+                    "normalized_coords": {
+                        "x_min": b["x_min"],
+                        "y_min": b["y_min"],
+                        "x_max": b["x_max"],
+                        "y_max": b["y_max"],
+                        "cx": b["cx"],
+                        "cy": b["cy"],
+                        "w": b["w"],
+                        "h": b["h"]
+                    },
+                    "relations": {
+                        "left": make_relation(left_neighbor, min_d_left),
+                        "right": make_relation(right_neighbor, min_d_right),
+                        "up": make_relation(up_neighbor, min_d_up),
+                        "down": make_relation(down_neighbor, min_d_down)
+                    }
+                })
+                
+            json_content = json.dumps({
+                "file_name": f"{stem}.jpg",
+                "image_width": img_w,
+                "image_height": img_h,
+                "annotations": annotations
+            }, indent=2)
+            zf.writestr(f"{prefix}labels/{stem}.json", json_content)
+
 
