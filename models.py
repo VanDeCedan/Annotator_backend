@@ -149,3 +149,27 @@ class KIEPrelabel(Base):
     text_value = Column(String, nullable=False)
     box_image = Column(String, nullable=True)
 
+
+class NERLabel(Base):
+    __tablename__ = "ner_labels"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    file_name = Column(String, nullable=False)
+    class_code = Column(Integer, nullable=False)
+    start_char = Column(Integer, nullable=False)
+    end_char = Column(Integer, nullable=False)
+    text_value = Column(String, nullable=False)
+
+
+class NERPrelabel(Base):
+    __tablename__ = "ner_prelabels"
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    file_name = Column(String, nullable=False)
+    class_code = Column(Integer, nullable=False)
+    start_char = Column(Integer, nullable=False)
+    end_char = Column(Integer, nullable=False)
+    text_value = Column(String, nullable=False)
+

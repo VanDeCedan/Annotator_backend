@@ -24,7 +24,7 @@ class UserOut(UserBase):
 # --- Project Schemas ---
 class ProjectBase(BaseModel):
     name: str
-    type: str  # Yolo | Yolo OBB | Ocr | Classification | Deskewer | KIE
+    type: str  # Yolo | Yolo OBB | Ocr | Classification | Deskewer | KIE | NER
     ocr_charset: Optional[str] = None
     dbnet_model_path: Optional[str] = None
     ocr_enable_class: Optional[bool] = False
@@ -105,6 +105,16 @@ class KIELabelItem(BaseModel):
 class KIELabelRequest(BaseModel):
     img_name: str
     labels: List[KIELabelItem]
+
+class NERLabelItem(BaseModel):
+    class_code: int
+    start_char: int
+    end_char: int
+    text_value: str
+
+class NERLabelRequest(BaseModel):
+    file_name: str
+    labels: List[NERLabelItem]
 
 # --- Token Schemas ---
 class Token(BaseModel):

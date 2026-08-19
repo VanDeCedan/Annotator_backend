@@ -75,6 +75,18 @@ async def generate_dataset(
                 
         for img_name, lbls in grouped.items():
             labels_data.append((img_name, lbls))
+            
+    elif project.type == "NER":
+        db_labels = db.query(models.NERLabel).filter(models.NERLabel.project_id == project_id).all()
+        grouped = {}
+        for l in db_labels:
+            if l.file_name not in grouped:
+                grouped[l.file_name] = []
+            if l.class_code != -1:
+                grouped[l.file_name].append((l.class_code, l.start_char, l.end_char, l.text_value))
+                
+        for file_name, lbls in grouped.items():
+            labels_data.append((file_name, lbls))
 
     if not labels_data:
         raise HTTPException(status_code=400, detail="No labeled data found for this project")

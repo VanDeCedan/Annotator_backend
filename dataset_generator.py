@@ -142,6 +142,7 @@ def generate_dataset_zip(
     with zipfile.ZipFile(zip_target, mode="w", compression=zipfile.ZIP_DEFLATED) as zf:
         split_images_collected = {}
         vit_rows_collected = {}
+        ner_data_collected = {}
 
         total_items = sum(len(sd) for sd in splits.values())
         current_item = 0
@@ -158,7 +159,7 @@ def generate_dataset_zip(
                     progress_callback(current_item, total_items)
 
                 # Unpack per project type
-                if project.type in ["Yolo", "Yolo OBB", "KIE"]:
+                if project.type in ["Yolo", "Yolo OBB", "KIE", "NER"]:
                     img_name, img_labels = item
                 elif project.type == "Classification":
                     img_name, class_code = item
@@ -174,6 +175,29 @@ def generate_dataset_zip(
 
                 img_path = session_dir / img_name
                 if not img_path.exists():
+                    continue
+
+                if project.type == "NER":
+                    with open(img_path, "r", encoding="utf-8") as f:
+                        text_content = f.read()
+                    
+                    entities = []
+                    for lbl in img_labels:
+                        c_code, start_char, end_char, _ = lbl
+                        class_name = class_map.get(c_code, f"class_{c_code}")
+                        entities.append({
+                            "start": start_char,
+                            "end": end_char,
+                            "label": class_name
+                        })
+                    
+                    if split_name not in ner_data_collected:
+                        ner_data_collected[split_name] = []
+                        
+                    ner_data_collected[split_name].append({
+                        "text": text_content,
+                        "entities": entities
+                    })
                     continue
 
                 try:
@@ -380,6 +404,15 @@ def generate_dataset_zip(
                 csv_filename = f"{prefix}dataset.csv"
                 zf.writestr(csv_filename, csv_io.getvalue())
                 csv_io.close()
+
+        # Write NER JSON
+        if project.type == "NER" and ner_data_collected:
+            for split_name, ner_docs in ner_data_collected.items():
+                if not ner_docs:
+                    continue
+                prefix = f"{split_name}/" if split_name else ""
+                json_content = json.dumps(ner_docs, indent=2, ensure_ascii=False)
+                zf.writestr(f"{prefix}dataset.json", json_content.encode("utf-8"))
 
     # File is closed when 'with' block exits.
     if output_path is None:

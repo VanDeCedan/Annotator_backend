@@ -80,6 +80,7 @@ def delete_image(
         db.query(models.OcrLabel).filter(models.OcrLabel.project_id == project_id, models.OcrLabel.img_name == img_name).delete()
         db.query(models.DeskewerLabel).filter(models.DeskewerLabel.project_id == project_id, models.DeskewerLabel.img_name == img_name).delete()
         db.query(models.KIELabel).filter(models.KIELabel.project_id == project_id, models.KIELabel.img_name == img_name).delete()
+        db.query(models.NERLabel).filter(models.NERLabel.project_id == project_id, models.NERLabel.file_name == img_name).delete()
         
         img_stem = Path(img_name).stem
         db.query(models.YoloPrelabel).filter(models.YoloPrelabel.project_id == project_id, models.YoloPrelabel.img_name == img_stem).delete()
@@ -87,6 +88,7 @@ def delete_image(
         db.query(models.OcrPrelabel).filter(models.OcrPrelabel.project_id == project_id, models.OcrPrelabel.img_name == img_stem).delete()
         db.query(models.DeskewerPrelabel).filter(models.DeskewerPrelabel.project_id == project_id, models.DeskewerPrelabel.img_name == img_stem).delete()
         db.query(models.KIEPrelabel).filter(models.KIEPrelabel.project_id == project_id, models.KIEPrelabel.img_name == img_stem).delete()
+        db.query(models.NERPrelabel).filter(models.NERPrelabel.project_id == project_id, models.NERPrelabel.file_name == img_stem).delete()
         
         db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == img_name).delete()
         db.commit()

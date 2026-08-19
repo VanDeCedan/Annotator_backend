@@ -109,6 +109,8 @@ def delete_project(
     db.query(models.DeskewerPrelabel).filter(models.DeskewerPrelabel.project_id == project_id).delete()
     db.query(models.KIELabel).filter(models.KIELabel.project_id == project_id).delete()
     db.query(models.KIEPrelabel).filter(models.KIEPrelabel.project_id == project_id).delete()
+    db.query(models.NERLabel).filter(models.NERLabel.project_id == project_id).delete()
+    db.query(models.NERPrelabel).filter(models.NERPrelabel.project_id == project_id).delete()
     db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id).delete()
     db.query(models.Class).filter(models.Class.project_id == project_id).delete()
     db.delete(project)
