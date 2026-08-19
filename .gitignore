@@ -24,3 +24,5 @@ __pycache__/
 *.png
 *.xlsx
 *.pdf
+*.txt
+!requirements.txt
