@@ -229,11 +229,13 @@ def skip_image(
     return {"message": "Skipped"}
 
 @router.get("/progress/")
-def get_progress(
+def get_labeling_progress(
     project_id: int,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
+    from database import DATA_DIR
+
     project = db.query(models.Project).filter(models.Project.id == project_id).first()
     if not project:
          raise HTTPException(status_code=404, detail="Project not found")
@@ -254,9 +256,20 @@ def get_progress(
          
     skipped_images = [r[0] for r in db.query(models.SkippedImage.img_name).filter(models.SkippedImage.project_id == project_id).distinct().all()]
     
+    upload_dir = DATA_DIR / "tmp_uploads" / str(project_id)
+    existing_files = set()
+    if upload_dir.exists():
+        for session_dir in upload_dir.iterdir():
+            if session_dir.is_dir():
+                for f in session_dir.iterdir():
+                    if f.is_file():
+                        existing_files.add(f.name)
+                        
+    labeled_images = [img for img in labeled_images if img in existing_files]
+    skipped_images = [img for img in skipped_images if img in existing_files]
+
     return {
         "labeled_images": labeled_images, 
         "labeled_count": len(labeled_images),
         "skipped_images": skipped_images
     }
-
