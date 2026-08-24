@@ -48,7 +48,12 @@ def list_images(
     if not session_dir.exists():
         return {"image_names": []}
         
-    images = [f.name for f in session_dir.iterdir() if f.is_file()]
+    # Get files with their modification times
+    files = [(f, f.stat().st_mtime) for f in session_dir.iterdir() if f.is_file()]
+    # Sort descending (newest first)
+    files.sort(key=lambda x: x[1], reverse=True)
+    images = [f[0].name for f in files]
+    
     return {"image_names": images}
 
 @router.get("/{session_id}/{img_name}")

@@ -445,7 +445,32 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map,
             for lbl in img_labels:
                 c_code = lbl[0]
                 coords = lbl[1]
-                if len(coords) >= 4:
+                if project.type == "Yolo OBB" and len(coords) >= 8:
+                    x1, y1, x2, y2, x3, y3, x4, y4 = coords[:8]
+                    px1 = int(round(x1 * img_w))
+                    py1 = int(round(y1 * img_h))
+                    px2 = int(round(x2 * img_w))
+                    py2 = int(round(y2 * img_h))
+                    px3 = int(round(x3 * img_w))
+                    py3 = int(round(y3 * img_h))
+                    px4 = int(round(x4 * img_w))
+                    py4 = int(round(y4 * img_h))
+                    
+                    px1 = max(0, min(px1, img_w)); py1 = max(0, min(py1, img_h))
+                    px2 = max(0, min(px2, img_w)); py2 = max(0, min(py2, img_h))
+                    px3 = max(0, min(px3, img_w)); py3 = max(0, min(py3, img_h))
+                    px4 = max(0, min(px4, img_w)); py4 = max(0, min(py4, img_h))
+                    
+                    # Sort clockwise to ensure a valid polygon (no bowties)
+                    points = [(px1, py1), (px2, py2), (px3, py3), (px4, py4)]
+                    cx = sum(p[0] for p in points) / 4.0
+                    cy = sum(p[1] for p in points) / 4.0
+                    import math
+                    points = sorted(points, key=lambda p: math.atan2(p[1] - cy, p[0] - cx))
+                    
+                    class_name = class_map.get(c_code, f"class_{c_code}")
+                    lines.append(f"{points[0][0]},{points[0][1]},{points[1][0]},{points[1][1]},{points[2][0]},{points[2][1]},{points[3][0]},{points[3][1]},{class_name}")
+                elif project.type == "Yolo" and len(coords) >= 4:
                     cx, cy, w, h = coords[:4]
                     x_min = int(round((cx - w / 2.0) * img_w))
                     y_min = int(round((cy - h / 2.0) * img_h))

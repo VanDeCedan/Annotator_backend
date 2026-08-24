@@ -133,6 +133,7 @@ class AugmentationOptions(BaseModel):
     grain: bool = False
     noise: bool = False
     blur: bool = False
+    max_rotation: int = 0
     num_augs: int = 3
     deskew_angles: List[int] = []
     

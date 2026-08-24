@@ -20,7 +20,7 @@ def get_ort_session(onnx_path: str):
         _session_cache[onnx_path] = ort.InferenceSession(onnx_path, providers=["CPUExecutionProvider"])
     return _session_cache[onnx_path]
 
-def run_yolo_live_predict(onnx_path: str, img_path: str, project: models.Project, conf_thres: float = 0.25):
+def run_yolo_live_predict(onnx_path: str, img_path: str, project: models.Project, conf_thres: float = 0.25, iou_thres: float = 0.45):
     img = cv2.imread(img_path)
     if img is None:
         raise ValueError(f"Could not read image: {img_path}")
@@ -50,7 +50,6 @@ def run_yolo_live_predict(onnx_path: str, img_path: str, project: models.Project
     outputs = session.run(None, {input_name: img_tensor})
     preds = outputs[0]
     
-    iou_thres = 0.45
     results = []
     
     if preds.ndim == 3 and preds.shape[-1] == 6:
@@ -133,7 +132,7 @@ def run_yolo_live_predict(onnx_path: str, img_path: str, project: models.Project
     return {"boxes": results}
 
 
-def run_yolo_obb_live_predict(onnx_path: str, img_path: str, project: models.Project, conf_thres: float = 0.25):
+def run_yolo_obb_live_predict(onnx_path: str, img_path: str, project: models.Project, conf_thres: float = 0.25, iou_thres: float = 0.45):
     img = cv2.imread(img_path)
     if img is None:
         raise ValueError(f"Could not read image: {img_path}")
@@ -246,7 +245,7 @@ def run_yolo_obb_live_predict(onnx_path: str, img_path: str, project: models.Pro
         ((float(cx), float(cy)), (float(w), float(h)), _math.degrees(float(a)))
         for (cx, cy, w, h), a in zip(boxes_f, angles_f)
     ]
-    idxs = cv2.dnn.NMSBoxesRotated(rotated_nms, max_scores.tolist(), 0.01, 0.45)
+    idxs = cv2.dnn.NMSBoxesRotated(rotated_nms, max_scores.tolist(), 0.01, iou_thres)
 
     if len(idxs) > 0:
         for idx in idxs.flatten():
@@ -316,6 +315,7 @@ def predict_live(
     project_id: int,
     img_name: str = Body(..., embed=True),
     conf_thresh: float = Body(0.25, embed=True),
+    iou_thresh: float = Body(0.45, embed=True),
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user)
 ):
@@ -399,9 +399,9 @@ def predict_live(
             
         # Non-DBNet routing
         if project.type == "Yolo":
-            return run_yolo_live_predict(onnx_path, img_path, project, conf_thres=conf_thresh)
+            return run_yolo_live_predict(onnx_path, img_path, project, conf_thres=conf_thresh, iou_thres=iou_thresh)
         elif project.type == "Yolo OBB":
-            return run_yolo_obb_live_predict(onnx_path, img_path, project, conf_thres=conf_thresh)
+            return run_yolo_obb_live_predict(onnx_path, img_path, project, conf_thres=conf_thresh, iou_thres=iou_thresh)
         elif project.type == "Ocr":
             return run_ocr_live_predict(onnx_path, img_path, project, conf_thresh=conf_thresh)
         else:

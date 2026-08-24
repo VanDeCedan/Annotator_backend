@@ -3,7 +3,56 @@ from PIL import Image
 import cv2
 import random
 import gc
+import math
 from typing import List, Tuple, Dict, Any
+
+def rotate_point(x, y, cx, cy, angle_deg):
+    angle_rad = math.radians(angle_deg)
+    cos_a = math.cos(angle_rad)
+    sin_a = math.sin(angle_rad)
+    x -= cx
+    y -= cy
+    new_x = x * cos_a + y * sin_a
+    new_y = -x * sin_a + y * cos_a
+    return new_x + cx, new_y + cy
+
+def rotate_obb_coords(coords: List[float], angle_deg: float) -> List[float]:
+    new_coords = []
+    for i in range(0, 8, 2):
+        nx, ny = rotate_point(coords[i], coords[i+1], 0.5, 0.5, angle_deg)
+        nx = max(0.0, min(1.0, nx))
+        ny = max(0.0, min(1.0, ny))
+        new_coords.extend([nx, ny])
+    return new_coords
+
+def rotate_yolo_coords(coords: List[float], angle_deg: float) -> List[float]:
+    cx, cy, w, h = coords
+    x_min = cx - w / 2
+    x_max = cx + w / 2
+    y_min = cy - h / 2
+    y_max = cy + h / 2
+    
+    corners = [
+        (x_min, y_min),
+        (x_max, y_min),
+        (x_max, y_max),
+        (x_min, y_max)
+    ]
+    
+    rx, ry = [], []
+    for x, y in corners:
+        nx, ny = rotate_point(x, y, 0.5, 0.5, angle_deg)
+        nx = max(0.0, min(1.0, nx))
+        ny = max(0.0, min(1.0, ny))
+        rx.append(nx)
+        ry.append(ny)
+        
+    new_cx = (min(rx) + max(rx)) / 2
+    new_cy = (min(ry) + max(ry)) / 2
+    new_w = max(rx) - min(rx)
+    new_h = max(ry) - min(ry)
+    
+    return [new_cx, new_cy, new_w, new_h]
 
 def apply_camera_grain(pil_img: Image.Image) -> Image.Image:
     img_np = np.array(pil_img)
@@ -92,6 +141,7 @@ def augment_image_and_labels(
     if getattr(opts, "grain", False):   enabled.append("grain")
     if getattr(opts, "noise", False):   enabled.append("noise")
     if getattr(opts, "blur", False):    enabled.append("blur")
+    if getattr(opts, "max_rotation", 0) > 0: enabled.append("rotate")
 
     if not enabled:
         return results
@@ -138,6 +188,22 @@ def augment_image_and_labels(
                 ksize = random.choice([3, 5])
                 aug_img = apply_blur(aug_img, ksize)
                 applied.append(f"BlurK{ksize}")
+            if "rotate" in chosen:
+                max_rot = getattr(opts, "max_rotation", 0)
+                if max_rot > 0:
+                    angle = random.uniform(-max_rot, max_rot)
+                    aug_img = aug_img.rotate(angle, expand=False, fillcolor=(0, 0, 0))
+                    new_labels = []
+                    for lbl in aug_labels:
+                        c_code = lbl[0]
+                        coords = lbl[1]
+                        if project_type == "Yolo OBB":
+                            new_coords = rotate_obb_coords(coords, angle)
+                        else:
+                            new_coords = rotate_yolo_coords(coords, angle)
+                        new_labels.append((c_code, new_coords, *lbl[2:]))
+                    aug_labels = new_labels
+                    applied.append(f"Rot{int(angle)}")
         
         results.append((aug_img, aug_labels, f"_aug_{k+1}"))
         gc.collect()
@@ -213,6 +279,7 @@ def augment_image_only(
     if getattr(opts, "grain", False):   enabled.append("grain")
     if getattr(opts, "noise", False):   enabled.append("noise")
     if getattr(opts, "blur", False):    enabled.append("blur")
+    if getattr(opts, "max_rotation", 0) > 0: enabled.append("rotate")
     
     # OCR specific
     ocr_distortion = getattr(opts, "ocr_distortion_intensity", 0.0)
@@ -263,6 +330,13 @@ def augment_image_only(
                 ksize = random.choice([3, 5])
                 aug_img = apply_blur(aug_img, ksize)
                 applied.append(f"BlurK{ksize}")
+            
+            if "rotate" in chosen:
+                max_rot = getattr(opts, "max_rotation", 0)
+                if max_rot > 0:
+                    angle = random.uniform(-max_rot, max_rot)
+                    aug_img = aug_img.rotate(angle, expand=False, fillcolor=(0, 0, 0))
+                    applied.append(f"Rot{int(angle)}")
             
             # OCR Specific Apps
             if "ocr_distortion" in chosen:

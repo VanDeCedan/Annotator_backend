@@ -241,8 +241,10 @@ def get_labeling_progress(
          raise HTTPException(status_code=404, detail="Project not found")
          
     labeled_images = []
+    bg_images = []
     if project.type in ["Yolo", "Yolo OBB"]:
          labeled_images = [r[0] for r in db.query(models.YoloLabel.img_name).filter(models.YoloLabel.project_id == project_id).distinct().all()]
+         bg_images = [r[0] for r in db.query(models.YoloLabel.img_name).filter(models.YoloLabel.project_id == project_id, models.YoloLabel.class_code == -1).distinct().all()]
     elif project.type == "Classification":
          labeled_images = [r[0] for r in db.query(models.ClassificationLabel.img_name).filter(models.ClassificationLabel.project_id == project_id).distinct().all()]
     elif project.type == "Ocr":
@@ -267,9 +269,11 @@ def get_labeling_progress(
                         
     labeled_images = [img for img in labeled_images if img in existing_files]
     skipped_images = [img for img in skipped_images if img in existing_files]
+    bg_images = [img for img in bg_images if img in existing_files]
 
     return {
         "labeled_images": labeled_images, 
         "labeled_count": len(labeled_images),
-        "skipped_images": skipped_images
+        "skipped_images": skipped_images,
+        "bg_count": len(bg_images)
     }
