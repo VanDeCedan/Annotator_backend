@@ -4,7 +4,7 @@ from typing import List
 import shutil
 from database import get_db
 from dependencies import get_current_user, require_role
-from schemas import ProjectCreate, ProjectUpdate, ProjectOut
+from schemas import ProjectCreate, ProjectUpdate, ProjectOut, ProjectDuplicate
 import models
 from routers.images import UPLOAD_DIR
 
@@ -71,6 +71,58 @@ def update_project(
     db.commit()
     db.refresh(project)
     return project
+
+@router.post("/{project_id}/duplicate", response_model=ProjectOut)
+def duplicate_project(
+    project_id: int,
+    duplicate_in: ProjectDuplicate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin"))
+):
+    project = db.query(models.Project).filter(models.Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Create new project
+    new_project = models.Project(
+        name=duplicate_in.name,
+        type=project.type,
+        ocr_charset=project.ocr_charset,
+        dbnet_model_path=project.dbnet_model_path,
+        ocr_enable_class=project.ocr_enable_class,
+        model_img_h=project.model_img_h,
+        model_img_w=project.model_img_w,
+        created_by=current_user.id,
+        statut="activated"
+    )
+    db.add(new_project)
+    db.commit()
+    db.refresh(new_project)
+
+    # Duplicate classes
+    classes = db.query(models.Class).filter(models.Class.project_id == project_id).all()
+    for cls in classes:
+        new_class = models.Class(
+            project_id=new_project.id,
+            code=cls.code,
+            label=cls.label,
+            color=cls.color
+        )
+        db.add(new_class)
+    db.commit()
+
+    # Duplicate data if requested
+    if duplicate_in.duplicate_data:
+        src_dir = UPLOAD_DIR / str(project_id)
+        if src_dir.exists():
+            dst_dir = UPLOAD_DIR / str(new_project.id)
+            shutil.copytree(src_dir, dst_dir)
+            
+            # Should we duplicate prelabels? It is "data". But let's check what user meant by "already done label". Pre-labels are model outputs, user hasn't done them. But maybe let's copy them to be nice? Or just the images. Often duplicating data means just copying the images. 
+            # I will just copy the images and not the DB prelabels. The user can always rerun inference.
+            # Actually, I should just not copy prelabels to keep it simple. The images are duplicated in the file system, which is great.
+
+    return new_project
 
 @router.patch("/{project_id}/deactivate", response_model=ProjectOut)
 def deactivate_project(

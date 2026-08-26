@@ -43,6 +43,10 @@ class ProjectUpdate(BaseModel):
     model_img_h: Optional[int] = None
     model_img_w: Optional[int] = None
 
+class ProjectDuplicate(BaseModel):
+    name: str
+    duplicate_data: bool = False
+
 class ProjectOut(ProjectBase):
     id: int
     created_by: int

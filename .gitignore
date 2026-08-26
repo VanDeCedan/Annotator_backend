@@ -4,6 +4,7 @@ env/
 venv/
 #.env
 .venv/
+.venv_linux/
 .env
 *.db
 *.db-shm
@@ -25,4 +26,4 @@ __pycache__/
 *.xlsx
 *.pdf
 *.txt
-!requirements.txt
+!requirements.txt.venv_linux/
