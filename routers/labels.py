@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from sqlalchemy import distinct
+from sqlalchemy import distinct, func
 from database import get_db
 from dependencies import get_current_user, require_role
 from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, DeskewerLabelRequest, SkipImageRequest, KIELabelRequest, NERLabelRequest
@@ -243,18 +243,18 @@ def get_labeling_progress(
     labeled_images = []
     bg_images = []
     if project.type in ["Yolo", "Yolo OBB"]:
-         labeled_images = [r[0] for r in db.query(models.YoloLabel.img_name).filter(models.YoloLabel.project_id == project_id).distinct().all()]
+         labeled_images = [r[0] for r in db.query(models.YoloLabel.img_name, func.max(models.YoloLabel.id).label("max_id")).filter(models.YoloLabel.project_id == project_id).group_by(models.YoloLabel.img_name).order_by(func.max(models.YoloLabel.id).desc()).all()]
          bg_images = [r[0] for r in db.query(models.YoloLabel.img_name).filter(models.YoloLabel.project_id == project_id, models.YoloLabel.class_code == -1).distinct().all()]
     elif project.type == "Classification":
-         labeled_images = [r[0] for r in db.query(models.ClassificationLabel.img_name).filter(models.ClassificationLabel.project_id == project_id).distinct().all()]
+         labeled_images = [r[0] for r in db.query(models.ClassificationLabel.img_name, func.max(models.ClassificationLabel.id).label("max_id")).filter(models.ClassificationLabel.project_id == project_id).group_by(models.ClassificationLabel.img_name).order_by(func.max(models.ClassificationLabel.id).desc()).all()]
     elif project.type == "Ocr":
-         labeled_images = [r[0] for r in db.query(models.OcrLabel.img_name).filter(models.OcrLabel.project_id == project_id).distinct().all()]
+         labeled_images = [r[0] for r in db.query(models.OcrLabel.img_name, func.max(models.OcrLabel.id).label("max_id")).filter(models.OcrLabel.project_id == project_id).group_by(models.OcrLabel.img_name).order_by(func.max(models.OcrLabel.id).desc()).all()]
     elif project.type == "Deskewer":
-         labeled_images = [r[0] for r in db.query(models.DeskewerLabel.img_name).filter(models.DeskewerLabel.project_id == project_id).distinct().all()]
+         labeled_images = [r[0] for r in db.query(models.DeskewerLabel.img_name, func.max(models.DeskewerLabel.id).label("max_id")).filter(models.DeskewerLabel.project_id == project_id).group_by(models.DeskewerLabel.img_name).order_by(func.max(models.DeskewerLabel.id).desc()).all()]
     elif project.type == "KIE":
-         labeled_images = [r[0] for r in db.query(models.KIELabel.img_name).filter(models.KIELabel.project_id == project_id).distinct().all()]
+         labeled_images = [r[0] for r in db.query(models.KIELabel.img_name, func.max(models.KIELabel.id).label("max_id")).filter(models.KIELabel.project_id == project_id).group_by(models.KIELabel.img_name).order_by(func.max(models.KIELabel.id).desc()).all()]
     elif project.type == "NER":
-         labeled_images = [r[0] for r in db.query(models.NERLabel.file_name).filter(models.NERLabel.project_id == project_id).distinct().all()]
+         labeled_images = [r[0] for r in db.query(models.NERLabel.file_name, func.max(models.NERLabel.id).label("max_id")).filter(models.NERLabel.project_id == project_id).group_by(models.NERLabel.file_name).order_by(func.max(models.NERLabel.id).desc()).all()]
          
     skipped_images = [r[0] for r in db.query(models.SkippedImage.img_name).filter(models.SkippedImage.project_id == project_id).distinct().all()]
     

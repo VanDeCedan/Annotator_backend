@@ -136,7 +136,9 @@ class AugmentationOptions(BaseModel):
     flip_hv: bool = False
     grain: bool = False
     noise: bool = False
+    noise_intensity: float = 5.0
     blur: bool = False
+    blur_intensity: float = 5.0
     max_rotation: int = 0
     num_augs: int = 3
     deskew_angles: List[int] = []

@@ -178,16 +178,25 @@ def augment_image_and_labels(
                 aug_img = apply_camera_grain(aug_img)
                 applied.append("Grain")
             if "noise" in chosen:
-                if random.random() < 0.5:
-                    aug_img = apply_salt_pepper_noise(aug_img, amount=random.uniform(0.008, 0.02))
-                    applied.append("SaltPepper")
-                else:
-                    aug_img = apply_gaussian_noise(aug_img, sigma=random.uniform(10, 20))
-                    applied.append("GaussNoise")
+                noise_intensity = getattr(opts, "noise_intensity", 5.0)
+                if noise_intensity > 0:
+                    if random.random() < 0.5:
+                        amount = random.uniform(0.005, 0.01) * (noise_intensity / 5.0)
+                        aug_img = apply_salt_pepper_noise(aug_img, amount=amount)
+                        applied.append(f"SaltPepper{noise_intensity}")
+                    else:
+                        sigma = random.uniform(10, 20) * (noise_intensity / 5.0)
+                        aug_img = apply_gaussian_noise(aug_img, sigma=sigma)
+                        applied.append(f"GaussNoise{noise_intensity}")
             if "blur" in chosen:
-                ksize = random.choice([3, 5])
-                aug_img = apply_blur(aug_img, ksize)
-                applied.append(f"BlurK{ksize}")
+                blur_intensity = getattr(opts, "blur_intensity", 5.0)
+                if blur_intensity > 0:
+                    # scale 1-10 to kernel size 3, 5, 7, 9, 11
+                    ksize = max(3, int(blur_intensity) * 2 - 1)
+                    if ksize % 2 == 0:
+                        ksize += 1
+                    aug_img = apply_blur(aug_img, ksize)
+                    applied.append(f"BlurK{ksize}")
             if "rotate" in chosen:
                 max_rot = getattr(opts, "max_rotation", 0)
                 if max_rot > 0:
@@ -320,16 +329,24 @@ def augment_image_only(
                 aug_img = apply_camera_grain(aug_img)
                 applied.append("Grain")
             if "noise" in chosen:
-                if random.random() < 0.5:
-                    aug_img = apply_salt_pepper_noise(aug_img, amount=random.uniform(0.008, 0.02))
-                    applied.append("SaltPepper")
-                else:
-                    aug_img = apply_gaussian_noise(aug_img, sigma=random.uniform(10, 20))
-                    applied.append("GaussNoise")
+                noise_intensity = getattr(opts, "noise_intensity", 5.0)
+                if noise_intensity > 0:
+                    if random.random() < 0.5:
+                        amount = random.uniform(0.005, 0.01) * (noise_intensity / 5.0)
+                        aug_img = apply_salt_pepper_noise(aug_img, amount=amount)
+                        applied.append(f"SaltPepper{noise_intensity}")
+                    else:
+                        sigma = random.uniform(10, 20) * (noise_intensity / 5.0)
+                        aug_img = apply_gaussian_noise(aug_img, sigma=sigma)
+                        applied.append(f"GaussNoise{noise_intensity}")
             if "blur" in chosen:
-                ksize = random.choice([3, 5])
-                aug_img = apply_blur(aug_img, ksize)
-                applied.append(f"BlurK{ksize}")
+                blur_intensity = getattr(opts, "blur_intensity", 5.0)
+                if blur_intensity > 0:
+                    ksize = max(3, int(blur_intensity) * 2 - 1)
+                    if ksize % 2 == 0:
+                        ksize += 1
+                    aug_img = apply_blur(aug_img, ksize)
+                    applied.append(f"BlurK{ksize}")
             
             if "rotate" in chosen:
                 max_rot = getattr(opts, "max_rotation", 0)
