@@ -88,6 +88,18 @@ async def generate_dataset(
         for file_name, lbls in grouped.items():
             labels_data.append((file_name, lbls))
 
+    elif project.type == "VLM":
+        db_labels = db.query(models.VLMLabel).filter(models.VLMLabel.project_id == project_id).all()
+        grouped = {}
+        for l in db_labels:
+            if l.img_name not in grouped:
+                grouped[l.img_name] = []
+            grouped[l.img_name].append((l.class_code, l.text_value))
+
+        for img_name, lbls in grouped.items():
+            labels_data.append((img_name, lbls))
+
+
     if not labels_data:
         raise HTTPException(status_code=400, detail="No labeled data found for this project")
 

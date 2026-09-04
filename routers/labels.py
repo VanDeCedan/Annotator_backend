@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import distinct, func
 from database import get_db
 from dependencies import get_current_user, require_role
-from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, DeskewerLabelRequest, SkipImageRequest, KIELabelRequest, NERLabelRequest
+from schemas import YoloLabelRequest, ClassificationLabelRequest, OcrLabelRequest, DeskewerLabelRequest, SkipImageRequest, KIELabelRequest, NERLabelRequest, VLMLabelRequest
 from typing import Union
 from pathlib import Path
 import models
@@ -83,6 +83,11 @@ def get_labels(
              return {"type": project.type, "labels": [{"class_code": l.class_code, "start_char": l.start_char, "end_char": l.end_char, "text_value": l.text_value} for l in labels if l.class_code != -1], "prelabels": [{"class_code": p.class_code, "start_char": p.start_char, "end_char": p.end_char, "text_value": p.text_value} for p in prelabels]}
         return {"type": project.type, "labels": [{"class_code": l.class_code, "start_char": l.start_char, "end_char": l.end_char, "text_value": l.text_value} for l in labels if l.class_code != -1], "prelabels": []}
 
+    elif project.type == "VLM":
+        labels = db.query(models.VLMLabel).filter(models.VLMLabel.project_id == project_id, models.VLMLabel.img_name == img_name).all()
+        return {"type": project.type, "labels": [{"class_code": l.class_code, "text_value": l.text_value} for l in labels]}
+
+
 @router.post("/yolo")
 def save_yolo_labels(
     project_id: int,
@@ -149,6 +154,24 @@ def save_ner_labels(
     if new_labels:
         db.bulk_save_objects(new_labels)
     db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.file_name).delete()
+    db.commit()
+    return {"message": "Saved"}
+
+@router.post("/vlm")
+def save_vlm_labels(
+    project_id: int,
+    request: VLMLabelRequest,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_role("admin", "annotator"))
+):
+    db.query(models.VLMLabel).filter(models.VLMLabel.project_id == project_id, models.VLMLabel.img_name == request.img_name).delete()
+    new_labels = [
+        models.VLMLabel(project_id=project_id, img_name=request.img_name, class_code=l.class_code, text_value=l.text_value)
+        for l in request.labels
+    ]
+    if new_labels:
+        db.bulk_save_objects(new_labels)
+    db.query(models.SkippedImage).filter(models.SkippedImage.project_id == project_id, models.SkippedImage.img_name == request.img_name).delete()
     db.commit()
     return {"message": "Saved"}
 
@@ -255,6 +278,8 @@ def get_labeling_progress(
          labeled_images = [r[0] for r in db.query(models.KIELabel.img_name, func.max(models.KIELabel.id).label("max_id")).filter(models.KIELabel.project_id == project_id).group_by(models.KIELabel.img_name).order_by(func.max(models.KIELabel.id).desc()).all()]
     elif project.type == "NER":
          labeled_images = [r[0] for r in db.query(models.NERLabel.file_name, func.max(models.NERLabel.id).label("max_id")).filter(models.NERLabel.project_id == project_id).group_by(models.NERLabel.file_name).order_by(func.max(models.NERLabel.id).desc()).all()]
+    elif project.type == "VLM":
+         labeled_images = [r[0] for r in db.query(models.VLMLabel.img_name, func.max(models.VLMLabel.id).label("max_id")).filter(models.VLMLabel.project_id == project_id).group_by(models.VLMLabel.img_name).order_by(func.max(models.VLMLabel.id).desc()).all()]
          
     skipped_images = [r[0] for r in db.query(models.SkippedImage.img_name).filter(models.SkippedImage.project_id == project_id).distinct().all()]
     

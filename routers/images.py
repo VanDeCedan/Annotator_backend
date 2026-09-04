@@ -61,11 +61,31 @@ def get_image(
     project_id: int,
     session_id: str,
     img_name: str,
+    thumbnail: bool = False,
     current_user: models.User = Depends(get_current_user)
 ):
     file_path = UPLOAD_DIR / str(project_id) / session_id / img_name
     if not file_path.exists():
         raise HTTPException(status_code=404, detail="Image not found")
+        
+    if thumbnail:
+        thumb_dir = UPLOAD_DIR / str(project_id) / session_id / ".thumbnails"
+        thumb_dir.mkdir(parents=True, exist_ok=True)
+        thumb_path = thumb_dir / f"{Path(img_name).stem}.jpg"
+        
+        if not thumb_path.exists():
+            try:
+                from PIL import Image
+                with Image.open(file_path) as img:
+                    img.thumbnail((256, 256))
+                    if img.mode != "RGB":
+                        img = img.convert("RGB")
+                    img.save(thumb_path, format="JPEG", quality=80)
+            except Exception as e:
+                # Fallback if image cannot be processed
+                return FileResponse(path=file_path)
+                
+        return FileResponse(path=thumb_path)
         
     return FileResponse(path=file_path)
 

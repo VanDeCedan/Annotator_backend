@@ -143,6 +143,8 @@ def generate_dataset_zip(
         split_images_collected = {}
         vit_rows_collected = {}
         ner_data_collected = {}
+        vlm_data_collected = {}
+
 
         total_items = sum(len(sd) for sd in splits.values())
         current_item = 0
@@ -172,12 +174,15 @@ def generate_dataset_zip(
                     item = (img_name, (value, class_code))
                 elif project.type == "Deskewer":
                     img_name, (angle, crop_box) = item
+                elif project.type == "VLM":
+                    img_name, img_labels = item
 
                 img_path = session_dir / img_name
                 if not img_path.exists():
                     continue
 
                 if project.type == "NER":
+
                     with open(img_path, "r", encoding="utf-8") as f:
                         text_content = f.read()
                     
@@ -199,6 +204,8 @@ def generate_dataset_zip(
                         "entities": entities
                     })
                     continue
+
+
 
                 try:
                     with Image.open(img_path) as raw_img:
@@ -290,7 +297,7 @@ def generate_dataset_zip(
                             deskewed_item = (img_name, (0, None))
                             _write_to_zip(zf, project, pil_img, prefix, stem, img_name, deskewed_item, class_map)
                         else:
-                            _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map, options, split_name, split_images_collected, vit_rows_collected)
+                            _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map, options, split_name, split_images_collected, vit_rows_collected, vlm_data_collected)
 
                         # Augmentations: only for training split
                         if options.augmentation and (split_name in ["train", ""] or (split_name in ["val", "valid"] and getattr(options.augmentation, "include_aug_in_val", False))):
@@ -341,13 +348,15 @@ def generate_dataset_zip(
                                 for aug_img, suffix in aug_results:
                                     if project.type == "Classification":
                                         aug_item = (f"{stem}{suffix}.jpg", class_code)
+                                    elif project.type == "VLM":
+                                        aug_item = (f"{stem}{suffix}.jpg", img_labels)
                                     else:
                                         aug_item = (f"{stem}{suffix}.jpg", value)
                                     _write_to_zip(
                                         zf, project, aug_img, prefix,
                                         f"{stem}{suffix}", f"{stem}{suffix}.jpg",
                                         aug_item, class_map,
-                                        options, split_name, split_images_collected, vit_rows_collected
+                                        options, split_name, split_images_collected, vit_rows_collected, vlm_data_collected
                                     )
                                     del aug_img
                                 del aug_results
@@ -414,6 +423,22 @@ def generate_dataset_zip(
                 json_content = json.dumps(ner_docs, indent=2, ensure_ascii=False)
                 zf.writestr(f"{prefix}dataset.json", json_content.encode("utf-8"))
 
+        # Write VLM JSONL
+        if project.type == "VLM" and vlm_data_collected:
+            vlm_export_format = getattr(options, "vlm_export_format", "smolvlm") or "smolvlm"
+            filename_map = {
+                "donut": "dataset_donut.jsonl",
+                "moondream2": "dataset_moondream.jsonl",
+            }
+            jsonl_filename = filename_map.get(vlm_export_format, "dataset.jsonl")
+            for split_name, vlm_records in vlm_data_collected.items():
+                if not vlm_records:
+                    continue
+                prefix = f"{split_name}/" if split_name else ""
+                jsonl_content = "\n".join(json.dumps(r, ensure_ascii=False) for r in vlm_records)
+                zf.writestr(f"{prefix}{jsonl_filename}", jsonl_content.encode("utf-8"))
+
+
     # File is closed when 'with' block exits.
     if output_path is None:
         zip_target.seek(0)
@@ -429,7 +454,7 @@ def _write_single_image_to_zip(zf, pil_img, zip_path):
     img_byte_arr.close()
 
 
-def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map, options=None, split_name="", split_images_collected=None, vit_rows_collected=None):
+def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map, options=None, split_name="", split_images_collected=None, vit_rows_collected=None, vlm_data_collected=None):
     """Encode *pil_img* to JPEG bytes and write image + label into the zip."""
     img_byte_arr = io.BytesIO()
     pil_img.save(img_byte_arr, format="JPEG", quality=95)
@@ -529,6 +554,54 @@ def _write_to_zip(zf, project, pil_img, prefix, stem, img_name, item, class_map,
         # Deskewer projects only export the deskewed images; label files are not generated.
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)
         
+    elif project.type == "VLM":
+        img_labels = item[1]
+        zf.writestr(f"{prefix}images/{img_name}", img_bytes)
+        
+        if vlm_data_collected is not None:
+            import json
+            if split_name not in vlm_data_collected:
+                vlm_data_collected[split_name] = []
+            
+            vlm_export_format = getattr(options, "vlm_export_format", "smolvlm") or "smolvlm"
+            if vlm_export_format == "donut":
+                gt_parse = {}
+                for c_code, text_val in img_labels:
+                    class_name = class_map.get(c_code, f"class_{c_code}")
+                    gt_parse[class_name] = text_val
+                vlm_data_collected[split_name].append({
+                    "file_name": f"images/{img_name}",
+                    "ground_truth": json.dumps({"gt_parse": gt_parse}, ensure_ascii=False)
+                })
+            elif vlm_export_format == "moondream2":
+                qa_pairs = []
+                for c_code, text_val in img_labels:
+                    class_name = class_map.get(c_code, f"class_{c_code}")
+                    if text_val:
+                        qa_pairs.append({"question": class_name, "answer": text_val})
+                vlm_data_collected[split_name].append({
+                    "image": f"images/{img_name}",
+                    "qa": qa_pairs
+                })
+            else:  # smolvlm (default)
+                conversations = []
+                for c_code, text_val in img_labels:
+                    class_name = class_map.get(c_code, f"class_{c_code}")
+                    if text_val:
+                        conversations.append({
+                            "role": "user",
+                            "content": f"<image>\n{class_name}"
+                        })
+                        conversations.append({
+                            "role": "assistant",
+                            "content": text_val
+                        })
+                vlm_data_collected[split_name].append({
+                    "image": f"images/{img_name}",
+                    "conversations": conversations
+                })
+
+
     elif project.type == "KIE":
         img_labels = item[1]
         zf.writestr(f"{prefix}images/{stem}.jpg", img_bytes)

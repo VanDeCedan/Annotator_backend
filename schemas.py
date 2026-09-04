@@ -120,6 +120,14 @@ class NERLabelRequest(BaseModel):
     file_name: str
     labels: List[NERLabelItem]
 
+class VLMLabelItem(BaseModel):
+    class_code: int
+    text_value: str
+
+class VLMLabelRequest(BaseModel):
+    img_name: str
+    labels: List[VLMLabelItem]
+
 # --- Token Schemas ---
 class Token(BaseModel):
     access_token: str
@@ -164,5 +172,6 @@ class DatasetRequest(BaseModel):
     kie_export_format: Optional[str] = "dbnet"
     yolo_export_format: Optional[str] = "yolo"  # "yolo" | "dbnet"
     ocr_export_format: Optional[str] = "ocr"   # "ocr" | "vit"
+    vlm_export_format: Optional[str] = "smolvlm"  # "smolvlm" | "donut" | "moondream2"
 
 

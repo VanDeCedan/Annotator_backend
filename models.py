@@ -17,7 +17,7 @@ class Project(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     name = Column(String, nullable=False)
-    type = Column(String, nullable=False)  # 'Yolo' | 'Yolo OBB' | 'Ocr' | 'Classification' | 'Deskewer' | 'KIE'
+    type = Column(String, nullable=False)  # 'Yolo' | 'Yolo OBB' | 'Ocr' | 'Classification' | 'Deskewer' | 'KIE' | 'VLM'
     ocr_charset = Column(String, nullable=True)
     dbnet_model_path = Column(String, nullable=True)
     ocr_enable_class = Column(Boolean, nullable=True, default=False)
@@ -171,5 +171,15 @@ class NERPrelabel(Base):
     class_code = Column(Integer, nullable=False)
     start_char = Column(Integer, nullable=False)
     end_char = Column(Integer, nullable=False)
+    text_value = Column(String, nullable=False)
+
+
+class VLMLabel(Base):
+    __tablename__ = "vlm_labels"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    project_id = Column(Integer, ForeignKey("projects.id"))
+    img_name = Column(String, nullable=False)
+    class_code = Column(Integer, nullable=False)
     text_value = Column(String, nullable=False)
 
